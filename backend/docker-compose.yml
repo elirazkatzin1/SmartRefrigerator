@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  # FastAPI Web Server Application
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://hadar_admin:my_secret_password@db:5432/fridge_inventory
+    depends_on:
+      - db
+
+  # PostgreSQL Relational Database Service
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_USER=hadar_admin
+      - POSTGRES_PASSWORD=my_secret_password
+      - POSTGRES_DB=fridge_inventory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
