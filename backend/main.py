@@ -11,3 +11,12 @@ async def root():
 async def health_check():
     # This matches the health check requirement for our first sprint task
     return {"status": "ok"}
+
+@app.post("/api/v1/fridge/status")
+async def root():
+    return {"message": "OK"}
+
+@app.post("/api/v1/fridge/upload-image")
+async def root():
+    return {"message": "OK"}
+
