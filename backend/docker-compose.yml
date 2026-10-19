@@ -11,7 +11,9 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://hadar_admin:my_secret_password@db:5432/fridge_inventory
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    command: bash -c "python init_db.py && uvicorn main:app --host 0.0.0.0 --port 8000 --reload"
 
   # PostgreSQL Relational Database Service
   db:
@@ -24,6 +26,11 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hadar_admin -d fridge_inventory"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
 volumes:
   postgres_data:
