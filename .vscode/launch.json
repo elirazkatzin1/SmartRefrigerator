@@ -8,8 +8,8 @@
       "args": [],
       "stopAtEntry": false,
       "externalConsole": true,
-      "cwd": "c:/github/SmartRefrigerator/fridge-camera-firmware/src",
-      "program": "c:/github/SmartRefrigerator/fridge-camera-firmware/src/build/Debug/outDebug",
+      "cwd": "c:/github/SmartRefrigerator",
+      "program": "c:/github/SmartRefrigerator/build/Debug/outDebug",
       "MIMode": "gdb",
       "miDebuggerPath": "gdb",
       "setupCommands": [
