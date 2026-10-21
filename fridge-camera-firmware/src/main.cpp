@@ -14,8 +14,8 @@ unsigned long lastLedToggle = 0;
 bool ledOn = false;
 
 bool doorOpen = false;
-bool lastDoorReading = false;
-unsigned long lastDoorChange = 0;
+volatile bool doorChanged = false;
+volatile unsigned long lastDoorInterrupt = 0;
 
 void connectToWiFi() {
   Serial.println("=== Starting WiFi Connection ===");
@@ -83,15 +83,21 @@ bool readDoorSensor() {
   return digitalRead(DOOR_SENSOR_PIN) == HIGH;
 }
 
-// מדפיס רק כשמצב הדלת משתנה ויציב למשך DOOR_DEBOUNCE_MS
-void checkDoorSensor() {
-  bool reading = readDoorSensor();
-  if (reading != lastDoorReading) {
-    lastDoorReading = reading;
-    lastDoorChange = millis();
-  }
+// ISR: רצה מיד כשהמתח בפין משתנה. חייבת להיות קצרה - רק מסמנת דגל, בלי Serial
+void IRAM_ATTR onDoorChange() {
+  doorChanged = true;
+  lastDoorInterrupt = millis();
+}
 
-  if (reading != doorOpen && millis() - lastDoorChange >= DOOR_DEBOUNCE_MS) {
+// מטפל בפסיקה מתוך loop: מחכה שהקפיצות יירגעו (DOOR_DEBOUNCE_MS) ומדפיס את המצב החדש
+void checkDoorSensor() {
+  if (!doorChanged || millis() - lastDoorInterrupt < DOOR_DEBOUNCE_MS) {
+    return;
+  }
+  doorChanged = false;
+
+  bool reading = readDoorSensor();
+  if (reading != doorOpen) {
     doorOpen = reading;
     Serial.println(doorOpen ? "Door OPENED" : "Door CLOSED");
   }
@@ -105,8 +111,8 @@ void setup() {
   pinMode(DOOR_SENSOR_PIN, INPUT_PULLUP);
 
   doorOpen = readDoorSensor();
-  lastDoorReading = doorOpen;
   Serial.println(doorOpen ? "Door initial state: OPEN" : "Door initial state: CLOSED");
+  attachInterrupt(digitalPinToInterrupt(DOOR_SENSOR_PIN), onDoorChange, CHANGE);
 
   connectToWiFi();
   Serial.println("=== SETUP DONE ===");
