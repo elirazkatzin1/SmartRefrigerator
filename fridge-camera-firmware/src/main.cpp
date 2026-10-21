@@ -47,6 +47,8 @@ void connectToWiFi() {
   Serial.println(WIFI_SSID);
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(false); // ההתחברות מחדש מנוהלת ב-checkWiFiConnection
+  // ביטול חיסכון החשמל של ה-WiFi: במצב שינה הרדיו מעכב חבילות ושליחת תמונות נכשלת
+  WiFi.setSleep(false);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   int count = 0;
@@ -65,6 +67,7 @@ void connectToWiFi() {
   if (wifiConnected) {
     Serial.print("Connected! IP address: ");
     Serial.println(WiFi.localIP());
+    Serial.printf("Signal strength (RSSI): %d dBm\n", WiFi.RSSI());
   }
 }
 
@@ -114,20 +117,21 @@ void initCamera() {
   config.pin_sccb_scl = SIOC_GPIO_NUM;
   config.pin_pwdn = PWDN_GPIO_NUM;
   config.pin_reset = RESET_GPIO_NUM;
-  config.xclk_freq_hz = 20000000;
+  config.xclk_freq_hz = 10000000;
   config.pixel_format = PIXFORMAT_JPEG;
-  config.grab_mode = CAMERA_GRAB_LATEST;
+  // באפר אחד + GRAB_WHEN_EMPTY: המצלמה מצלמת רק כשמבקשים ממנה ונחה בין צילומים.
+  // צילום רציף ברקע (GRAB_LATEST) מעמיס על הזיכרון ומאט מאוד את ה-WiFi
+  config.grab_mode = CAMERA_GRAB_WHEN_EMPTY;
+  config.fb_count = 1;
 
-  // עם PSRAM אפשר רזולוציה גבוהה יותר ושני באפרים
+  // עם PSRAM אפשר רזולוציה גבוהה יותר
   if (psramFound()) {
     config.frame_size = FRAMESIZE_SVGA; // 800x600
     config.jpeg_quality = 12;
-    config.fb_count = 2;
     config.fb_location = CAMERA_FB_IN_PSRAM;
   } else {
     config.frame_size = FRAMESIZE_VGA; // 640x480
     config.jpeg_quality = 15;
-    config.fb_count = 1;
     config.fb_location = CAMERA_FB_IN_DRAM;
   }
 
@@ -219,7 +223,7 @@ void captureAndUploadImage() {
   }
 
   digitalWrite(FLASH_LED_PIN, HIGH);
-  // הפריים הראשון עלול להיות ישן (צולם לפני שהפלאש נדלק) - זורקים אותו
+  // הפריים שבבאפר צולם מיד אחרי הצילום הקודם (ישן ובלי פלאש) - זורקים אותו
   camera_fb_t *fb = esp_camera_fb_get();
   if (fb) {
     esp_camera_fb_return(fb);

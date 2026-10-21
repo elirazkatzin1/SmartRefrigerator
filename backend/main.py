@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 
 # Initializing the FastAPI application
 app = FastAPI(title="VISION Smart Refrigerator API")
@@ -17,6 +17,10 @@ async def root():
     return {"message": "OK"}
 
 @app.post("/api/v1/fridge/upload-image")
-async def root():
-    return {"message": "OK"}
+async def upload_image(file: UploadFile = File(...)):
+    # Read the whole multipart body before responding, otherwise the connection
+    # is closed while the camera is still sending and it gets "connection reset"
+    image_bytes = await file.read()
+    print(f"Received image: {file.filename}, {len(image_bytes)} bytes", flush=True)
+    return {"message": "OK", "size": len(image_bytes)}
 
