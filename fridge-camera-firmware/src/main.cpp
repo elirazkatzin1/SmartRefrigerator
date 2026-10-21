@@ -144,6 +144,15 @@ void initCamera() {
   }
 }
 
+// מדפיס את קוד התשובה של השרת בפורמט אחיד. בשגיאה (לא 2xx) מדפיס גם את גוף התשובה
+void logHttpResponse(const char *endpoint, int code, unsigned long durationMs, const String &body) {
+  bool success = code >= 200 && code < 300;
+  Serial.printf("[HTTP] POST %s -> %d %s (%lu ms)\n", endpoint, code, success ? "OK" : "ERROR", durationMs);
+  if (!success && body.length() > 0) {
+    Serial.printf("[HTTP] Response body: %s\n", body.substring(0, 200).c_str());
+  }
+}
+
 // מפרק את SERVER_URL ("http://host:port") ל-host ו-port עבור WiFiClient
 void parseServerUrl(String &host, uint16_t &port) {
   String url = SERVER_URL;
@@ -205,11 +214,19 @@ void uploadImage(camera_fb_t *fb) {
     delay(10);
   }
   String statusLine = client.readStringUntil('\n');
+  int code = statusLine.length() > 12 ? statusLine.substring(9, 12).toInt() : 0;
+  unsigned long duration = millis() - start;
+
+  // גוף התשובה מגיע אחרי שורה ריקה שמסיימת את הכותרות
+  String body;
+  if (code > 0 && client.find("\r\n\r\n")) {
+    body = client.readString();
+  }
   client.stop();
 
-  int code = statusLine.length() > 12 ? statusLine.substring(9, 12).toInt() : 0;
   if (code > 0) {
-    Serial.printf("Image sent: HTTP %d (%u bytes, %lu ms)\n", code, fb->len, millis() - start);
+    Serial.printf("Image uploaded: %u bytes\n", fb->len);
+    logHttpResponse(IMAGE_UPLOAD_ENDPOINT, code, duration, body);
   } else {
     Serial.println("Image upload failed: no response from server");
   }
@@ -271,7 +288,7 @@ void sendDoorStatus(bool isOpen) {
   int code = http.POST(body);
 
   if (code > 0) {
-    Serial.printf("Door status sent: HTTP %d (%lu ms)\n", code, millis() - start);
+    logHttpResponse(DOOR_STATUS_ENDPOINT, code, millis() - start, http.getString());
   } else {
     Serial.printf("Door status send failed: %s\n", http.errorToString(code).c_str());
   }
