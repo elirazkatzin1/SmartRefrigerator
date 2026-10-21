@@ -5,11 +5,17 @@
 #define FLASH_LED_PIN 4
 #define WIFI_RETRY_INTERVAL_MS 10000
 #define LED_BLINK_INTERVAL_MS 1000
+#define DOOR_SENSOR_PIN 13 // MC-38: חוט אחד ל-GPIO13, השני ל-GND
+#define DOOR_DEBOUNCE_MS 50
 
 bool wifiConnected = false;
 unsigned long lastReconnectAttempt = 0;
 unsigned long lastLedToggle = 0;
 bool ledOn = false;
+
+bool doorOpen = false;
+bool lastDoorReading = false;
+unsigned long lastDoorChange = 0;
 
 void connectToWiFi() {
   Serial.println("=== Starting WiFi Connection ===");
@@ -72,11 +78,35 @@ void blinkLed() {
   }
 }
 
+// מגנט צמוד (דלת סגורה) = LOW, מגנט רחוק (דלת פתוחה) = HIGH
+bool readDoorSensor() {
+  return digitalRead(DOOR_SENSOR_PIN) == HIGH;
+}
+
+// מדפיס רק כשמצב הדלת משתנה ויציב למשך DOOR_DEBOUNCE_MS
+void checkDoorSensor() {
+  bool reading = readDoorSensor();
+  if (reading != lastDoorReading) {
+    lastDoorReading = reading;
+    lastDoorChange = millis();
+  }
+
+  if (reading != doorOpen && millis() - lastDoorChange >= DOOR_DEBOUNCE_MS) {
+    doorOpen = reading;
+    Serial.println(doorOpen ? "Door OPENED" : "Door CLOSED");
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(2000); // תן למונטור להתחבר
   Serial.println("\n\n=== SETUP STARTING ===");
   pinMode(FLASH_LED_PIN, OUTPUT);
+  pinMode(DOOR_SENSOR_PIN, INPUT_PULLUP);
+
+  doorOpen = readDoorSensor();
+  lastDoorReading = doorOpen;
+  Serial.println(doorOpen ? "Door initial state: OPEN" : "Door initial state: CLOSED");
 
   connectToWiFi();
   Serial.println("=== SETUP DONE ===");
@@ -84,5 +114,6 @@ void setup() {
 
 void loop() {
   checkWiFiConnection();
+  checkDoorSensor();
   blinkLed();
 }
