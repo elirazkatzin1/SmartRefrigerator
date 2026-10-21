@@ -3,11 +3,20 @@
 #include "config.h"
 
 #define FLASH_LED_PIN 4
+#define WIFI_RETRY_INTERVAL_MS 10000
+#define LED_BLINK_INTERVAL_MS 1000
+
+bool wifiConnected = false;
+unsigned long lastReconnectAttempt = 0;
+unsigned long lastLedToggle = 0;
+bool ledOn = false;
 
 void connectToWiFi() {
   Serial.println("=== Starting WiFi Connection ===");
   Serial.print("Connecting to WiFi: ");
   Serial.println(WIFI_SSID);
+  WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(false); // ההתחברות מחדש מנוהלת ב-checkWiFiConnection
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
   int count = 0;
@@ -16,15 +25,50 @@ void connectToWiFi() {
     Serial.print(".");
     count++;
     if (count > 20) {
-      Serial.println("\nConnection timeout!");
+      Serial.println("\nConnection timeout! Will keep retrying in loop.");
       break;
     }
   }
 
   Serial.println();
-  if (WiFi.status() == WL_CONNECTED) {
+  wifiConnected = (WiFi.status() == WL_CONNECTED);
+  if (wifiConnected) {
     Serial.print("Connected! IP address: ");
     Serial.println(WiFi.localIP());
+  }
+}
+
+// בדיקה לא חוסמת: מזהה ניתוק ומנסה להתחבר מחדש כל WIFI_RETRY_INTERVAL_MS
+void checkWiFiConnection() {
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!wifiConnected) {
+      wifiConnected = true;
+      Serial.print("Reconnected! IP address: ");
+      Serial.println(WiFi.localIP());
+    }
+    return;
+  }
+
+  if (wifiConnected) {
+    wifiConnected = false;
+    Serial.println("WiFi connection lost!");
+    // לא מנסים מיד: בניתוק הראשון ספריית ה-WiFi מבצעת ניסיון אחד משלה
+    lastReconnectAttempt = millis();
+  }
+
+  if (millis() - lastReconnectAttempt >= WIFI_RETRY_INTERVAL_MS) {
+    lastReconnectAttempt = millis();
+    Serial.println("Trying to reconnect to WiFi...");
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  }
+}
+
+void blinkLed() {
+  if (millis() - lastLedToggle >= LED_BLINK_INTERVAL_MS) {
+    lastLedToggle = millis();
+    ledOn = !ledOn;
+    digitalWrite(FLASH_LED_PIN, ledOn ? HIGH : LOW);
   }
 }
 
@@ -39,10 +83,6 @@ void setup() {
 }
 
 void loop() {
-  digitalWrite(FLASH_LED_PIN, HIGH);
-  Serial.println("LED ON");
-  delay(1000);
-  digitalWrite(FLASH_LED_PIN, LOW);
-  Serial.println("LED OFF");
-  delay(1000);
+  checkWiFiConnection();
+  blinkLed();
 }
