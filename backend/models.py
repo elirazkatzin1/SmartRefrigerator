@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime
 from datetime import datetime
 from database import Base
 
@@ -17,3 +17,12 @@ class FridgeState(Base):
     id = Column(Integer, primary_key=True, index=True)
     is_online = Column(Boolean, default=True)
     last_heartbeat = Column(DateTime, default=datetime.utcnow)
+
+class DoorEvent(Base):
+    __tablename__ = "door_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    door_open = Column(Boolean, nullable=False)
+    # millis() on the ESP32 is an unsigned 32-bit value, which overflows a signed Integer
+    uptime_ms = Column(BigInteger, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
