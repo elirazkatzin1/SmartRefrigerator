@@ -232,11 +232,12 @@ void uploadImage(camera_fb_t *fb) {
   }
 }
 
-// מצלם עם פלאש (בתוך מקרר סגור חשוך) ושולח לשרת
-void captureAndUploadImage() {
+// מצלם עם פלאש (בתוך מקרר סגור חשוך). מחזיר nullptr אם הצילום נכשל.
+// מי שקורא לפונקציה אחראי להחזיר את הבאפר עם esp_camera_fb_return
+camera_fb_t *captureImage() {
   if (!cameraReady) {
     Serial.println("Image not captured: camera not ready");
-    return;
+    return nullptr;
   }
 
   digitalWrite(FLASH_LED_PIN, HIGH);
@@ -250,12 +251,11 @@ void captureAndUploadImage() {
 
   if (!fb) {
     Serial.println("Image capture failed");
-    return;
+    return nullptr;
   }
 
   Serial.printf("Image captured: %u bytes\n", fb->len);
-  uploadImage(fb);
-  esp_camera_fb_return(fb);
+  return fb;
 }
 
 // מגנט צמוד (דלת סגורה) = LOW, מגנט רחוק (דלת פתוחה) = HIGH
@@ -306,10 +306,17 @@ void checkDoorSensor() {
   if (reading != doorOpen) {
     doorOpen = reading;
     Serial.println(doorOpen ? "Door OPENED" : "Door CLOSED");
-    sendDoorStatus(doorOpen);
-    // כשהדלת נסגרת מצלמים את תכולת המקרר
-    if (!doorOpen) {
-      captureAndUploadImage();
+    if (doorOpen) {
+      sendDoorStatus(true);
+    } else {
+      // כשהדלת נסגרת מצלמים מיד, עוד לפני שליחת הסטטוס לשרת,
+      // כדי שהמתנה לשרת איטי או לא זמין (עד כמה שניות) לא תעכב את הצילום
+      camera_fb_t *fb = captureImage();
+      sendDoorStatus(false);
+      if (fb) {
+        uploadImage(fb);
+        esp_camera_fb_return(fb);
+      }
     }
   }
 }
