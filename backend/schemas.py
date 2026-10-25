@@ -1,5 +1,5 @@
-from datetime import datetime
-from typing import Literal
+from datetime import date, datetime
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,3 +18,13 @@ class DoorStatusResponse(BaseModel):
     door_open: bool
     uptime_ms: int
     created_at: datetime
+
+
+class InventoryItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    product_name: str
+    category: Optional[str] = None
+    expiration_date: Optional[date] = None
+    added_at: datetime

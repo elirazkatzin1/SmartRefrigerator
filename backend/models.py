@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, Date, DateTime
 from datetime import datetime
 from database import Base
 
@@ -8,7 +8,7 @@ class Inventory(Base):
     id = Column(Integer, primary_key=True, index=True)
     product_name = Column(String, index=True, nullable=False)
     category = Column(String, index=True)
-    expiration_date = Column(String)
+    expiration_date = Column(Date)
     added_at = Column(DateTime, default=datetime.utcnow)
 
 class FridgeState(Base):
@@ -17,6 +17,7 @@ class FridgeState(Base):
     id = Column(Integer, primary_key=True, index=True)
     is_online = Column(Boolean, default=True)
     last_heartbeat = Column(DateTime, default=datetime.utcnow)
+    last_image_taken = Column(DateTime, nullable=True)
 
 class DoorEvent(Base):
     __tablename__ = "door_events"
