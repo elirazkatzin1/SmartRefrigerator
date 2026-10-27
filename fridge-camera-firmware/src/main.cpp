@@ -5,6 +5,12 @@
 #include "config.h"
 
 #define FLASH_LED_PIN 4
+// עוצמת הפלאש: 0 (כבוי) עד 255 (מלא). עוצמה נמוכה צורכת פחות זרם ומונעת נפילת מתח שמנתקת את ה-WiFi
+#define FLASH_BRIGHTNESS 80
+// ערוץ 2 (טיימר 1) - ערוץ 0 וטיימר 0 תפוסים על ידי שעון המצלמה
+#define FLASH_PWM_CHANNEL 2
+#define FLASH_PWM_FREQ 5000
+#define FLASH_PWM_RESOLUTION 8
 #define WIFI_RETRY_INTERVAL_MS 10000
 #define DOOR_SENSOR_PIN 13 // MC-38: חוט אחד ל-GPIO13, השני ל-GND
 #define DOOR_DEBOUNCE_MS 50
@@ -240,14 +246,14 @@ camera_fb_t *captureImage() {
     return nullptr;
   }
 
-  digitalWrite(FLASH_LED_PIN, HIGH);
+  ledcWrite(FLASH_PWM_CHANNEL, FLASH_BRIGHTNESS);
   // הפריים שבבאפר צולם מיד אחרי הצילום הקודם (ישן ובלי פלאש) - זורקים אותו
   camera_fb_t *fb = esp_camera_fb_get();
   if (fb) {
     esp_camera_fb_return(fb);
   }
   fb = esp_camera_fb_get();
-  digitalWrite(FLASH_LED_PIN, LOW);
+  ledcWrite(FLASH_PWM_CHANNEL, 0);
 
   if (!fb) {
     Serial.println("Image capture failed");
@@ -325,8 +331,9 @@ void setup() {
   Serial.begin(115200);
   delay(2000); // תן למונטור להתחבר
   Serial.println("\n\n=== SETUP STARTING ===");
-  pinMode(FLASH_LED_PIN, OUTPUT);
-  digitalWrite(FLASH_LED_PIN, LOW);
+  ledcSetup(FLASH_PWM_CHANNEL, FLASH_PWM_FREQ, FLASH_PWM_RESOLUTION);
+  ledcAttachPin(FLASH_LED_PIN, FLASH_PWM_CHANNEL);
+  ledcWrite(FLASH_PWM_CHANNEL, 0);
   pinMode(DOOR_SENSOR_PIN, INPUT_PULLUP);
 
   doorOpen = readDoorSensor();
