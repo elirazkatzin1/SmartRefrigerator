@@ -3,6 +3,15 @@
 #include "camera.h"
 #include "door_sensor.h"
 #include "api_client.h"
+#include "config.h"
+
+// כל מצלמה חייבת מזהה ייחודי בין 1 ל-5, מוגדר ב-config.h של אותו לוח
+#ifndef CAMERA_ID
+#error "CAMERA_ID is not defined - add '#define CAMERA_ID <1-5>' to include/config.h"
+#endif
+#if CAMERA_ID < 1 || CAMERA_ID > 5
+#error "CAMERA_ID must be between 1 and 5"
+#endif
 
 // מה קורה כשמצב הדלת משתנה
 void handleDoorChange(bool isOpen) {
@@ -26,6 +35,7 @@ void setup() {
   Serial.begin(115200);
   delay(2000); // תן למונטור להתחבר
   Serial.println("\n\n=== SETUP STARTING ===");
+  Serial.printf("Camera ID: %d\n", CAMERA_ID);
 
   bool doorOpen = initDoorSensor();
   Serial.println(doorOpen ? "Door initial state: OPEN" : "Door initial state: CLOSED");

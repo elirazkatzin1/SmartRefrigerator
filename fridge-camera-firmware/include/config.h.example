@@ -5,3 +5,6 @@
 #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
 // Backend server base URL (your PC IP on the same network, port 8000)
 #define SERVER_URL    "http://192.168.1.100:8000"
+
+// Unique ID of this camera (1-5). Each ESP32-CAM must get a different number
+#define CAMERA_ID     1
