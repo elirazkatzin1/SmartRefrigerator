@@ -2,3 +2,17 @@ fastapi==0.111.0
 uvicorn==0.30.1
 sqlalchemy==2.0.30
 asyncpg==0.29.0
+# Image preprocessing. The full opencv-python (not -headless) because ultralytics depends on it;
+# installing both makes them overwrite each other's cv2. Its GUI libs are installed in the Dockerfile
+opencv-python==4.10.0.84
+numpy==1.26.4
+
+# Object detection (YOLO). torch/torchvision are the CPU-only builds:
+# the default Linux wheels include CUDA (GPU) libraries and add several GB to the image
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.4.1+cpu
+torchvision==0.19.1+cpu
+ultralytics==8.3.40
+
+# OCR for brand names (needs the tesseract-ocr system package, installed in the Dockerfile)
+pytesseract==0.3.13

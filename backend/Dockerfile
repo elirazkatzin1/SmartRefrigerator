@@ -4,6 +4,17 @@ FROM python:3.10-slim
 # Set the working directory in the container
 WORKDIR /app
 
+# System packages:
+# - tesseract-ocr + Hebrew/English language data for reading brand names (pytesseract calls this binary)
+# - libgl1, libglib2.0-0: ultralytics installs the full opencv-python, which needs these to import cv2
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        tesseract-ocr \
+        tesseract-ocr-heb \
+        tesseract-ocr-eng \
+        libgl1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Copy the requirements file into the container
 COPY requirements.txt .
 
