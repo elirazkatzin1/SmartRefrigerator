@@ -20,6 +20,20 @@ BLACK_MEAN_THRESHOLD = 15
 # blows out a close object (measured: mean 254, std 0.1)
 BLANK_STD_THRESHOLD = 3
 
+# Lighting normalization: frames whose average brightness is outside this range are
+# gamma-corrected toward TARGET_MEAN_BRIGHTNESS before local contrast is equalized
+DARK_MEAN_THRESHOLD = 90
+BRIGHT_MEAN_THRESHOLD = 170
+TARGET_MEAN_BRIGHTNESS = 128
+# Limits how strongly gamma may brighten (<1) or darken (>1), so noise and blown-out
+# areas are not exaggerated
+MIN_GAMMA = 0.4
+MAX_GAMMA = 2.5
+# CLAHE (adaptive histogram equalization): evens out the flash hot-spot in the middle and the
+# dark edges. A higher clip limit gives more contrast but also amplifies sensor noise
+CLAHE_CLIP_LIMIT = 2.0
+CLAHE_TILE_GRID = (8, 8)
+
 
 def _reject(path: Path, reason: str) -> None:
     logger.warning("Rejected image %s: %s", path.name, reason)
@@ -66,11 +80,39 @@ def validate_image(image: np.ndarray, path: Path) -> None:
         _reject(path, f"blank image, single solid color (mean {mean:.1f}, contrast {std:.1f})")
 
 
+def _gamma_correct(lightness: np.ndarray, mean: float) -> np.ndarray:
+    # Solves (mean/255) ** gamma == target/255, so the average brightness moves to the target
+    gamma = np.log(TARGET_MEAN_BRIGHTNESS / 255) / np.log(mean / 255)
+    gamma = float(np.clip(gamma, MIN_GAMMA, MAX_GAMMA))
+    lookup = ((np.arange(256) / 255) ** gamma * 255).round().astype(np.uint8)
+    return cv2.LUT(lightness, lookup)
+
+
+def normalize_lighting(image: np.ndarray) -> np.ndarray:
+    """Even out the uneven, flash-lit lighting of a fridge frame.
+
+    Works only on the lightness channel (LAB color space), so product colors are kept:
+    1. Global: frames that are too dark or too bright are gamma-corrected toward mid-gray.
+    2. Local: CLAHE equalizes contrast per region, fixing the bright flash spot in the
+       center and the dark corners.
+    """
+    lab = cv2.cvtColor(image, cv2.COLOR_BGR2LAB)
+    lightness, a, b = cv2.split(lab)
+
+    mean = float(lightness.mean())
+    if mean < DARK_MEAN_THRESHOLD or mean > BRIGHT_MEAN_THRESHOLD:
+        lightness = _gamma_correct(lightness, mean)
+
+    clahe = cv2.createCLAHE(clipLimit=CLAHE_CLIP_LIMIT, tileGridSize=CLAHE_TILE_GRID)
+    lightness = clahe.apply(lightness)
+
+    return cv2.cvtColor(cv2.merge((lightness, a, b)), cv2.COLOR_LAB2BGR)
+
+
 def preprocess(path: str | Path) -> np.ndarray:
     """Load an ESP32-CAM image and return it cleaned and enhanced for detection.
 
     Raises ImageRejectedError for black or corrupted images.
     """
     image = load_image(path)
-    # Enhancement (lighting / contrast correction) is the next step of this story
-    return image
+    return normalize_lighting(image)
