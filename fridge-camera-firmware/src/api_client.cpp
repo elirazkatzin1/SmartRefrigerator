@@ -34,7 +34,7 @@ static void parseServerUrl(String &host, uint16_t &port) {
 }
 
 // זמן המתנה קצר כדי לא לתקוע את loop אם השרת לא זמין
-void sendDoorStatus(bool isOpen) {
+void sendDoorStatus(bool isOpen, const String &eventId) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Door status not sent: WiFi not connected");
     return;
@@ -47,7 +47,8 @@ void sendDoorStatus(bool isOpen) {
   http.addHeader("Content-Type", "application/json");
 
   String body = String("{\"event\":\"door\",\"door_open\":") + (isOpen ? "true" : "false") +
-                ",\"uptime_ms\":" + millis() + "}";
+                ",\"uptime_ms\":" + millis() + ",\"camera_id\":" + CAMERA_ID +
+                ",\"event_id\":" + (eventId.length() > 0 ? "\"" + eventId + "\"" : String("null")) + "}";
   unsigned long start = millis();
   int code = http.POST(body);
 
@@ -60,7 +61,7 @@ void sendDoorStatus(bool isOpen) {
 }
 
 // הגוף נכתב לסוקט בחתיכות ישירות מה-frame buffer, בלי להעתיק את התמונה לזיכרון נוסף
-void uploadImage(camera_fb_t *fb) {
+void uploadImage(camera_fb_t *fb, const String &eventId) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Image not sent: WiFi not connected");
     return;
@@ -76,7 +77,12 @@ void uploadImage(camera_fb_t *fb) {
     return;
   }
 
+  // שדות טקסט (camera_id, event_id) ואחריהם הקובץ עצמו
   String head = String("--") + MULTIPART_BOUNDARY + "\r\n" +
+                "Content-Disposition: form-data; name=\"camera_id\"\r\n\r\n" + CAMERA_ID + "\r\n" +
+                "--" + MULTIPART_BOUNDARY + "\r\n" +
+                "Content-Disposition: form-data; name=\"event_id\"\r\n\r\n" + eventId + "\r\n" +
+                "--" + MULTIPART_BOUNDARY + "\r\n" +
                 "Content-Disposition: form-data; name=\"file\"; filename=\"fridge.jpg\"\r\n" +
                 "Content-Type: image/jpeg\r\n\r\n";
   String tail = String("\r\n--") + MULTIPART_BOUNDARY + "--\r\n";

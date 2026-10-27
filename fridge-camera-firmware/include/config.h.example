@@ -8,3 +8,7 @@
 
 // Unique ID of this camera (1-5). Each ESP32-CAM must get a different number
 #define CAMERA_ID     1
+
+// 1 = this board has the door sensor: it creates the event_id and tells the other cameras to capture.
+// 0 = follower camera. Exactly ONE camera must be 1
+#define IS_DOOR_MASTER 0
