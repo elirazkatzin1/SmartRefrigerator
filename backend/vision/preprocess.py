@@ -4,6 +4,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from vision.calibration import undistort
 from vision.errors import ImageRejectedError
 
 logger = logging.getLogger(__name__)
@@ -157,10 +158,12 @@ def enhance(image: np.ndarray) -> np.ndarray:
     return sharpen(image)
 
 
-def preprocess(path: str | Path) -> np.ndarray:
+def preprocess(path: str | Path, camera_id: int | None = None) -> np.ndarray:
     """Load an ESP32-CAM image and return it cleaned and enhanced for detection.
 
-    Raises ImageRejectedError for black or corrupted images.
+    If camera_id has a saved lens calibration, the distortion is corrected first, so the
+    later steps work on the true geometry. Raises ImageRejectedError for black or corrupted images.
     """
     image = load_image(path)
+    image = undistort(image, camera_id)
     return enhance(image)
