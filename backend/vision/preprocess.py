@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 import cv2
@@ -49,6 +50,12 @@ DENOISE_SEARCH_WINDOW = 21
 SHARPEN_SIGMA = 1.5
 SHARPEN_AMOUNT = 0.8
 SHARPEN_THRESHOLD = 3
+
+# A copy of every processed image is saved here under the original's name, so the input
+# the detector actually saw can be compared with the raw upload in storage/images
+PROCESSED_DIR = Path(__file__).resolve().parent.parent / "storage" / "processed"
+# Set SAVE_PROCESSED_IMAGES=false to stop saving the copies once debugging is no longer needed
+SAVE_PROCESSED_IMAGES = os.getenv("SAVE_PROCESSED_IMAGES", "true").lower() != "false"
 
 
 def _reject(path: Path, reason: str) -> None:
@@ -158,12 +165,28 @@ def enhance(image: np.ndarray) -> np.ndarray:
     return sharpen(image)
 
 
+def save_processed(image: np.ndarray, name: str) -> None:
+    """Save a debugging copy of a processed image. A failure is logged, never raised,
+    because a missing debug copy must not stop the analysis."""
+    try:
+        PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(PROCESSED_DIR / name), image):
+            logger.warning("Could not save processed image %s", name)
+    except (OSError, cv2.error) as error:
+        logger.warning("Could not save processed image %s: %s", name, error)
+
+
 def preprocess(path: str | Path, camera_id: int | None = None) -> np.ndarray:
     """Load an ESP32-CAM image and return it cleaned and enhanced for detection.
 
     If camera_id has a saved lens calibration, the distortion is corrected first, so the
     later steps work on the true geometry. Raises ImageRejectedError for black or corrupted images.
+    A copy of the result is saved to storage/processed/ (see SAVE_PROCESSED_IMAGES).
     """
+    path = Path(path)
     image = load_image(path)
     image = undistort(image, camera_id)
-    return enhance(image)
+    image = enhance(image)
+    if SAVE_PROCESSED_IMAGES:
+        save_processed(image, path.name)
+    return image
