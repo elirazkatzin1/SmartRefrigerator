@@ -14,7 +14,7 @@ import cv2
 import numpy as np
 
 from vision.errors import ImageRejectedError
-from vision.preprocess import load_image, normalize_lighting
+from vision.preprocess import enhance, load_image
 
 IMAGES_DIR = Path(__file__).resolve().parent.parent / "storage" / "images"
 PREVIEW_DIR = IMAGES_DIR.parent / "preview"
@@ -22,7 +22,11 @@ PREVIEW_DIR = IMAGES_DIR.parent / "preview"
 
 def main(count: int) -> None:
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    images = sorted(IMAGES_DIR.glob("*.jpg"))[-count:]
+    # File names start with the upload time, so sorting by name puts the newest last
+    images = sorted(path for path in IMAGES_DIR.iterdir() if path.suffix in (".jpg", ".png"))[-count:]
+    if not images:
+        print(f"No .jpg or .png images in {IMAGES_DIR}")
+        return
 
     for path in images:
         try:
@@ -30,7 +34,7 @@ def main(count: int) -> None:
         except ImageRejectedError as error:
             print(f"REJECTED  {error}")
             continue
-        side_by_side = np.hstack([original, normalize_lighting(original)])
+        side_by_side = np.hstack([original, enhance(original)])
         cv2.imwrite(str(PREVIEW_DIR / path.name), side_by_side)
         print(f"saved     {PREVIEW_DIR.name}/{path.name}")
 

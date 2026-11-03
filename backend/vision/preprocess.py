@@ -1,9 +1,11 @@
 import logging
+import os
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+from vision.calibration import undistort
 from vision.errors import ImageRejectedError
 
 logger = logging.getLogger(__name__)
@@ -33,6 +35,27 @@ MAX_GAMMA = 2.5
 # dark edges. A higher clip limit gives more contrast but also amplifies sensor noise
 CLAHE_CLIP_LIMIT = 2.0
 CLAHE_TILE_GRID = (8, 8)
+
+# Denoising (non-local means): removes the ESP32-CAM sensor grain and JPEG blocks while keeping
+# edges, unlike a Gaussian blur. Strength is kept low because a higher one smears the small
+# text on labels that OCR needs. Separate strengths for lightness and color: color noise
+# (colored speckles) is more visible and carries no detail, so it is removed more strongly
+DENOISE_STRENGTH = 5
+DENOISE_COLOR_STRENGTH = 7
+DENOISE_TEMPLATE_WINDOW = 7
+DENOISE_SEARCH_WINDOW = 21
+# Unsharp mask: image + amount * (image - blurred). The sigma sets the size of the edges that
+# get enhanced, the amount how strongly. Differences below the threshold are left unsharpened,
+# so the noise that is left in flat areas (fridge walls, shelves) is not amplified
+SHARPEN_SIGMA = 1.5
+SHARPEN_AMOUNT = 0.8
+SHARPEN_THRESHOLD = 3
+
+# A copy of every processed image is saved here under the original's name, so the input
+# the detector actually saw can be compared with the raw upload in storage/images
+PROCESSED_DIR = Path(__file__).resolve().parent.parent / "storage" / "processed"
+# Set SAVE_PROCESSED_IMAGES=false to stop saving the copies once debugging is no longer needed
+SAVE_PROCESSED_IMAGES = os.getenv("SAVE_PROCESSED_IMAGES", "true").lower() != "false"
 
 
 def _reject(path: Path, reason: str) -> None:
@@ -109,10 +132,61 @@ def normalize_lighting(image: np.ndarray) -> np.ndarray:
     return cv2.cvtColor(cv2.merge((lightness, a, b)), cv2.COLOR_LAB2BGR)
 
 
-def preprocess(path: str | Path) -> np.ndarray:
+def reduce_noise(image: np.ndarray) -> np.ndarray:
+    """Remove sensor grain and JPEG artifacts while keeping edges and label text."""
+    return cv2.fastNlMeansDenoisingColored(
+        image,
+        None,
+        h=DENOISE_STRENGTH,
+        hColor=DENOISE_COLOR_STRENGTH,
+        templateWindowSize=DENOISE_TEMPLATE_WINDOW,
+        searchWindowSize=DENOISE_SEARCH_WINDOW,
+    )
+
+
+def sharpen(image: np.ndarray) -> np.ndarray:
+    """Unsharp mask: enhance edges (product outlines, label text) without amplifying flat-area noise."""
+    blurred = cv2.GaussianBlur(image, (0, 0), SHARPEN_SIGMA)
+    sharpened = cv2.addWeighted(image, 1 + SHARPEN_AMOUNT, blurred, -SHARPEN_AMOUNT, 0)
+    # Keep the original pixel wherever it barely differs from its surroundings
+    flat = cv2.absdiff(image, blurred) < SHARPEN_THRESHOLD
+    sharpened[flat] = image[flat]
+    return sharpened
+
+
+def enhance(image: np.ndarray) -> np.ndarray:
+    """Clean up and enhance a validated frame for detection and OCR.
+
+    Denoising runs first because CLAHE in normalize_lighting amplifies noise along with
+    contrast, and sharpening runs last so it enhances the final edges, not the noise.
+    """
+    image = reduce_noise(image)
+    image = normalize_lighting(image)
+    return sharpen(image)
+
+
+def save_processed(image: np.ndarray, name: str) -> None:
+    """Save a debugging copy of a processed image. A failure is logged, never raised,
+    because a missing debug copy must not stop the analysis."""
+    try:
+        PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(PROCESSED_DIR / name), image):
+            logger.warning("Could not save processed image %s", name)
+    except (OSError, cv2.error) as error:
+        logger.warning("Could not save processed image %s: %s", name, error)
+
+
+def preprocess(path: str | Path, camera_id: int | None = None) -> np.ndarray:
     """Load an ESP32-CAM image and return it cleaned and enhanced for detection.
 
-    Raises ImageRejectedError for black or corrupted images.
+    If camera_id has a saved lens calibration, the distortion is corrected first, so the
+    later steps work on the true geometry. Raises ImageRejectedError for black or corrupted images.
+    A copy of the result is saved to storage/processed/ (see SAVE_PROCESSED_IMAGES).
     """
+    path = Path(path)
     image = load_image(path)
-    return normalize_lighting(image)
+    image = undistort(image, camera_id)
+    image = enhance(image)
+    if SAVE_PROCESSED_IMAGES:
+        save_processed(image, path.name)
+    return image
