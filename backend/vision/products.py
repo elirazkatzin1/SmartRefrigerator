@@ -16,6 +16,7 @@ class Category(str, Enum):
     MEAT = "Meat"
     DRINKS = "Drinks"
     SPREADS_AND_SAUCES = "Spreads & Sauces"
+    BAKERY = "Bakery"
 
 
 @dataclass(frozen=True)
@@ -32,29 +33,29 @@ PRODUCTS: tuple[Product, ...] = (
     Product("milk", "חלב", Category.DAIRY),
     Product("yogurt", "יוגורט", Category.DAIRY),
     Product("cottage_cheese", "קוטג'", Category.DAIRY),
-    Product("white_cheese", "גבינה לבנה", Category.DAIRY),
     Product("yellow_cheese", "גבינה צהובה", Category.DAIRY),
-    Product("butter", "חמאה", Category.DAIRY),
     Product("eggs", "ביצים", Category.DAIRY),
+    # Rich's non-dairy whipping cream: parve, but sold and stored next to the dairy creams
+    Product("rich_cream", "ריץ'", Category.DAIRY),
+    Product("cooking_cream", "שמנת לבישול", Category.DAIRY),
+    Product("chocolate_pudding", "מעדן שוקולד", Category.DAIRY),
     Product("tomato", "עגבנייה", Category.VEGETABLES),
     Product("cucumber", "מלפפון", Category.VEGETABLES),
     Product("bell_pepper", "פלפל", Category.VEGETABLES),
     Product("carrot", "גזר", Category.VEGETABLES),
     Product("lettuce", "חסה", Category.VEGETABLES),
-    Product("apple", "תפוח", Category.FRUIT),
-    Product("orange", "תפוז", Category.FRUIT),
+    Product("onion", "בצל", Category.VEGETABLES),
     Product("lemon", "לימון", Category.FRUIT),
-    Product("grapes", "ענבים", Category.FRUIT),
-    Product("strawberries", "תותים", Category.FRUIT),
-    Product("chicken", "עוף", Category.MEAT),
-    Product("deli_meat", "נקניק", Category.MEAT),
-    Product("hot_dogs", "נקניקיות", Category.MEAT),
-    Product("soft_drink", "משקה מוגז", Category.DRINKS),
-    Product("juice", "מיץ", Category.DRINKS),
-    Product("water_bottle", "בקבוק מים", Category.DRINKS),
+    Product("wine", "יין", Category.DRINKS),
     Product("hummus", "חומוס", Category.SPREADS_AND_SAUCES),
     Product("ketchup", "קטשופ", Category.SPREADS_AND_SAUCES),
     Product("mayonnaise", "מיונז", Category.SPREADS_AND_SAUCES),
+    Product("mustard", "חרדל", Category.SPREADS_AND_SAUCES),
+    Product("soy_sauce", "רוטב סויה", Category.SPREADS_AND_SAUCES),
+    Product("teriyaki", "רוטב טריאקי", Category.SPREADS_AND_SAUCES),
+    Product("sweet_chili", "רוטב צ'ילי מתוק", Category.SPREADS_AND_SAUCES),
+    Product("pesto", "פסטו", Category.SPREADS_AND_SAUCES),
+    Product("tortillas", "טורטיות", Category.BAKERY),
 )
 
 PRODUCTS_BY_NAME: dict[str, Product] = {product.name: product for product in PRODUCTS}

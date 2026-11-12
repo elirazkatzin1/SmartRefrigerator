@@ -34,10 +34,10 @@ static void parseServerUrl(String &host, uint16_t &port) {
 }
 
 // זמן המתנה קצר כדי לא לתקוע את loop אם השרת לא זמין
-void sendDoorStatus(bool isOpen, const String &eventId) {
+bool sendDoorStatus(bool isOpen, const String &eventId, unsigned long uptimeMs) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Door status not sent: WiFi not connected");
-    return;
+    return false;
   }
 
   HTTPClient http;
@@ -47,24 +47,26 @@ void sendDoorStatus(bool isOpen, const String &eventId) {
   http.addHeader("Content-Type", "application/json");
 
   String body = String("{\"event\":\"door\",\"door_open\":") + (isOpen ? "true" : "false") +
-                ",\"uptime_ms\":" + millis() + ",\"camera_id\":" + CAMERA_ID +
+                ",\"uptime_ms\":" + uptimeMs + ",\"camera_id\":" + CAMERA_ID +
                 ",\"event_id\":" + (eventId.length() > 0 ? "\"" + eventId + "\"" : String("null")) + "}";
   unsigned long start = millis();
   int code = http.POST(body);
 
-  if (code > 0) {
+  bool delivered = code > 0;
+  if (delivered) {
     logHttpResponse(DOOR_STATUS_ENDPOINT, code, millis() - start, http.getString());
   } else {
     Serial.printf("Door status send failed: %s\n", http.errorToString(code).c_str());
   }
   http.end();
+  return delivered;
 }
 
-// הגוף נכתב לסוקט בחתיכות ישירות מה-frame buffer, בלי להעתיק את התמונה לזיכרון נוסף
-void uploadImage(camera_fb_t *fb, const String &eventId) {
+// הגוף נכתב לסוקט בחתיכות ישירות מהבאפר, בלי להעתיק את התמונה לזיכרון נוסף
+bool uploadImage(const uint8_t *data, size_t len, const String &eventId) {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("Image not sent: WiFi not connected");
-    return;
+    return false;
   }
 
   String host;
@@ -74,7 +76,7 @@ void uploadImage(camera_fb_t *fb, const String &eventId) {
   WiFiClient client;
   if (!client.connect(host.c_str(), port, HTTP_TIMEOUT_MS)) {
     Serial.println("Image upload failed: connection refused");
-    return;
+    return false;
   }
 
   // שדות טקסט (camera_id, event_id) ואחריהם הקובץ עצמו
@@ -86,7 +88,7 @@ void uploadImage(camera_fb_t *fb, const String &eventId) {
                 "Content-Disposition: form-data; name=\"file\"; filename=\"fridge.jpg\"\r\n" +
                 "Content-Type: image/jpeg\r\n\r\n";
   String tail = String("\r\n--") + MULTIPART_BOUNDARY + "--\r\n";
-  size_t contentLength = head.length() + fb->len + tail.length();
+  size_t contentLength = head.length() + len + tail.length();
 
   unsigned long start = millis();
   client.printf("POST %s HTTP/1.1\r\n", IMAGE_UPLOAD_ENDPOINT);
@@ -96,12 +98,12 @@ void uploadImage(camera_fb_t *fb, const String &eventId) {
   client.print("Connection: close\r\n\r\n");
   client.print(head);
 
-  for (size_t sent = 0; sent < fb->len; sent += UPLOAD_CHUNK_SIZE) {
-    size_t chunk = min((size_t)UPLOAD_CHUNK_SIZE, fb->len - sent);
-    if (client.write(fb->buf + sent, chunk) != chunk) {
+  for (size_t sent = 0; sent < len; sent += UPLOAD_CHUNK_SIZE) {
+    size_t chunk = min((size_t)UPLOAD_CHUNK_SIZE, len - sent);
+    if (client.write(data + sent, chunk) != chunk) {
       Serial.println("Image upload failed: write error");
       client.stop();
-      return;
+      return false;
     }
   }
   client.print(tail);
@@ -123,9 +125,11 @@ void uploadImage(camera_fb_t *fb, const String &eventId) {
   client.stop();
 
   if (code > 0) {
-    Serial.printf("Image uploaded: %u bytes\n", fb->len);
+    Serial.printf("Image uploaded: %u bytes\n", len);
     logHttpResponse(IMAGE_UPLOAD_ENDPOINT, code, duration, body);
-  } else {
-    Serial.println("Image upload failed: no response from server");
+    return true;
   }
+  // ייתכן שהשרת כן שמר את התמונה. שליחה חוזרת בטוחה: השרת דורס את cam<id>.jpg של אותו אירוע
+  Serial.println("Image upload failed: no response from server");
+  return false;
 }
