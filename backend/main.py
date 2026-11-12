@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from analysis import analyze_upload, fail_interrupted_analyses
 from database import get_db
+from log import configure_logging, log
 from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory
 from schemas import DoorStatusCreate, DoorStatusResponse, EventAnalysisResponse, InventoryItemResponse
 from vision import detector
@@ -19,17 +21,20 @@ from vision.draw import draw_detections
 from vision.errors import ImageRejectedError
 from vision.preprocess import load_image
 
+configure_logging()
+logger = logging.getLogger("main")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Load the YOLO weights once on startup, not on every request
     try:
         await run_in_threadpool(detector.load_model)
-        print(f"Detector loaded from {detector.DETECTOR_WEIGHTS}", flush=True)
+        log(logger, "detector loaded", weights=detector.DETECTOR_WEIGHTS)
     except FileNotFoundError as error:
         # The server still starts without a trained model, so the cameras can keep uploading
         # images (which are needed to train one). Detection fails until the weights exist
-        print(f"WARNING: {error}", flush=True)
+        log(logger, str(error), logging.WARNING)
     # Analyses a restart cut off would otherwise stay "processing" forever
     await fail_interrupted_analyses()
     yield
@@ -68,7 +73,7 @@ async def update_door_status(status: DoorStatusCreate, db: AsyncSession = Depend
     db.add(event)
     await db.commit()
     await db.refresh(event)
-    print(f"Door {'OPENED' if event.door_open else 'CLOSED'} (uptime {event.uptime_ms} ms)", flush=True)
+    log(logger, "door opened" if event.door_open else "door closed", uptime_ms=event.uptime_ms)
     return event
 
 #מקבל תמונה כmultipart, שומר אותה בתיקייה storage/images/<event_id> ומפעיל את הניתוח ברקע
@@ -121,7 +126,7 @@ async def upload_image(
     # Runs after the response is sent, so the camera gets 201 right away
     background_tasks.add_task(analyze_upload, analysis.id, str(IMAGES_DIR / filename))
 
-    print(f"Saved image: {filename}, {len(image_bytes)} bytes", flush=True)
+    log(logger, "image uploaded", event_id=event_id, camera_id=camera_id, bytes=len(image_bytes))
     return {
         "message": "OK",
         "filename": filename,

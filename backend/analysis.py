@@ -13,6 +13,7 @@ from datetime import datetime
 from sqlalchemy import update
 
 from database import AsyncSessionLocal
+from log import log
 from inventory.diff import ChangeType, ProductChange, current_quantities, diff_inventory
 from inventory.event_collector import EventCollector, ReadyEvent
 from inventory.merge import build_snapshot
@@ -53,7 +54,8 @@ async def sync_event(event: ReadyEvent) -> None:
     try:
         await _update_inventory(event)
     except Exception as error:
-        logger.exception("Event %s: inventory update failed, inventory left unchanged", event.event_id)
+        logger.exception("inventory update failed, inventory left unchanged",
+                         extra={"fields": {"event_id": event.event_id, "error": _describe(error)}})
         try:
             async with AsyncSessionLocal() as db:
                 db.add(EventAnalysis(event_id=event.event_id, camera_ids=sorted(event.camera_ids),
@@ -61,7 +63,7 @@ async def sync_event(event: ReadyEvent) -> None:
                 await db.commit()
         except Exception:
             # E.g. the database itself is down: the log above is all that can be done
-            logger.exception("Event %s: could not record the failure", event.event_id)
+            logger.exception("could not record the failed event", extra={"fields": {"event_id": event.event_id}})
 
 
 async def _update_inventory(event: ReadyEvent) -> None:
@@ -71,16 +73,26 @@ async def _update_inventory(event: ReadyEvent) -> None:
         event_time = datetime.utcnow()
         await apply_quantities(db, snapshot, changes, event_time)
         removed = await apply_removals(db, changes, event_time)
+        recorded = [_recorded_change(change, removed) for change in changes if change.change != ChangeType.UNCHANGED]
         db.add(EventAnalysis(
             event_id=event.event_id,
             camera_ids=sorted(event.camera_ids),
             timed_out=event.timed_out,
             snapshot=[{**asdict(item), "camera_ids": sorted(item.camera_ids)} for item in snapshot.values()],
-            changes=[_recorded_change(change, removed) for change in changes if change.change != ChangeType.UNCHANGED],
+            changes=recorded,
             created_at=event_time,
         ))
         await db.commit()
-    print(f"Event {event.event_id}: inventory updated from cameras {sorted(event.camera_ids)}", flush=True)
+
+    # One field per kind of change, listing its products, e.g. added=carrot,milk quantity_changed=lemon:2->1
+    by_kind = {}
+    for change in recorded:
+        entry = change["product_name"]
+        if change["change"] == "quantity_changed":
+            entry += f":{change['old_quantity']}->{change['new_quantity']}"
+        by_kind.setdefault(change["change"], []).append(entry)
+    log(logger, "inventory updated", event_id=event.event_id, cameras=sorted(event.camera_ids),
+        timed_out=event.timed_out, products=len(snapshot), **by_kind)
 
 
 collector = EventCollector(sync_event)
@@ -104,7 +116,7 @@ async def analyze_upload(analysis_id: int, path: str) -> None:
     except Exception:
         # The row itself couldn't be read or saved (e.g. the database is down). The event is still
         # merged from the other cameras after the timeout
-        logger.exception("Image analysis %d: could not be run or recorded", analysis_id)
+        logger.exception("image analysis could not be run or recorded", extra={"fields": {"analysis_id": analysis_id}})
         return
     await collector.image_analyzed(event_id, camera_id)
 
@@ -126,11 +138,17 @@ async def _analyze(analysis_id: int, path: str) -> tuple[str, int]:
             analysis.error = str(error)
             analysis.status = AnalysisStatus.FAILED.value
         except Exception as error:
-            # Anything else, e.g. no trained model or an OpenCV error
-            logger.exception("Image analysis %d (%s) failed", analysis_id, analysis.filename)
+            # Anything else, e.g. no trained model or an OpenCV error. The traceback goes to the log
+            logger.exception("image analysis crashed", extra={"fields": {"analysis_id": analysis_id}})
             analysis.error = _describe(error)
             analysis.status = AnalysisStatus.FAILED.value
         await db.commit()
+
+        log(logger, "image analyzed", logging.INFO if analysis.status == AnalysisStatus.DONE.value else logging.WARNING,
+            event_id=analysis.event_id, camera_id=analysis.camera_id, status=analysis.status,
+            processing_ms=analysis.processing_time_ms if analysis.processing_time_ms is not None else "-",
+            detections=len(analysis.detections or []),
+            **({"error": analysis.error} if analysis.error else {}))
         return analysis.event_id, analysis.camera_id
 
 
@@ -147,4 +165,4 @@ async def fail_interrupted_analyses() -> None:
         )
         await db.commit()
     if result.rowcount:
-        logger.warning("Marked %d analyses interrupted by a restart as failed", result.rowcount)
+        log(logger, "analyses interrupted by a restart marked failed", logging.WARNING, count=result.rowcount)

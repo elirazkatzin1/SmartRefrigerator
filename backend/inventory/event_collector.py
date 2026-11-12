@@ -12,6 +12,8 @@ import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
+from log import log
+
 logger = logging.getLogger(__name__)
 
 # How many cameras the fridge has. The design is 5; set EXPECTED_CAMERAS while fewer are installed,
@@ -54,7 +56,8 @@ class EventCollector:
     async def image_analyzed(self, event_id: str, camera_id: int) -> None:
         """Report that one camera's image of this event has been analyzed (done or failed)."""
         if event_id in self._released:
-            logger.warning("Image from camera %d arrived after event %s was merged; ignored", camera_id, event_id)
+            log(logger, "image arrived after its event was merged, ignored", logging.WARNING,
+                event_id=event_id, camera_id=camera_id)
             return
 
         pending = self._pending.setdefault(event_id, _PendingEvent())
@@ -70,8 +73,8 @@ class EventCollector:
         await asyncio.sleep(self._timeout_s)
         pending = self._pending.get(event_id)
         if pending is not None:
-            logger.warning("Event %s timed out with %d of %d cameras: %s", event_id, len(pending.camera_ids),
-                           self._expected_cameras, sorted(pending.camera_ids))
+            log(logger, "event timed out, merging the cameras that arrived", logging.WARNING, event_id=event_id,
+                cameras=sorted(pending.camera_ids), expected=self._expected_cameras)
             await self._release(event_id, timed_out=True)
 
     async def _release(self, event_id: str, timed_out: bool) -> None:
