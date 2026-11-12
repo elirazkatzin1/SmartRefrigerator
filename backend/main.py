@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -10,9 +11,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db
 from models import DoorEvent, FridgeState, Inventory
 from schemas import DoorStatusCreate, DoorStatusResponse, InventoryItemResponse
+from vision import detector
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load the YOLO weights once on startup, not on every request
+    try:
+        await run_in_threadpool(detector.load_model)
+        print(f"Detector loaded from {detector.DETECTOR_WEIGHTS}", flush=True)
+    except FileNotFoundError as error:
+        # The server still starts without a trained model, so the cameras can keep uploading
+        # images (which are needed to train one). Detection fails until the weights exist
+        print(f"WARNING: {error}", flush=True)
+    yield
+
 
 # Initializing the FastAPI application
-app = FastAPI(title="VISION Smart Refrigerator API")
+app = FastAPI(title="VISION Smart Refrigerator API", lifespan=lifespan)
 
 # Images are stored next to this file, so in Docker they land in backend/storage/images on the host
 IMAGES_DIR = Path(__file__).parent / "storage" / "images"

@@ -36,22 +36,29 @@ class Detection:
 
 
 @lru_cache(maxsize=1)
-def _load_model() -> YOLO:
+def load_model() -> YOLO:
+    """Load the weights once and keep them. Called by the server on startup (main.lifespan).
+
+    Also runs one prediction on a blank image: the first prediction sets up the model and takes
+    several seconds, which would otherwise delay the first real image.
+    """
     if not DETECTOR_WEIGHTS.exists():
         raise FileNotFoundError(
             f"No trained model at {DETECTOR_WEIGHTS}. Train one with `python -m scripts.train_detector`"
         )
     logger.info("Loading detector weights from %s", DETECTOR_WEIGHTS)
-    return YOLO(str(DETECTOR_WEIGHTS))
+    model = YOLO(str(DETECTOR_WEIGHTS))
+    model.predict(np.zeros((480, 640, 3), dtype=np.uint8), verbose=False)
+    return model
 
 
 def detect(image: np.ndarray, confidence: float = DEFAULT_CONFIDENCE) -> list[Detection]:
     """Find the products in a BGR image (as loaded by OpenCV) with the trained YOLO model.
 
     Detections below `confidence` are dropped, and duplicate boxes are removed with NMS.
-    The model is loaded on the first call and reused afterwards.
+    The server loads the model on startup; outside the server it is loaded on the first call.
     """
-    model = _load_model()
+    model = load_model()
     result = model.predict(image, conf=confidence, iou=NMS_IOU, agnostic_nms=NMS_ACROSS_CLASSES, verbose=False)[0]
 
     detections = []
