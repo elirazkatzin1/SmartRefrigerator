@@ -7,8 +7,9 @@ A product can have several rows (one per purchase, each with its own expiration 
 - Fewer than before: items are taken off the row that expires first, which is usually what gets
   used first. A row that reaches 0 is marked removed (removed_at), not deleted.
 
-Products the cameras no longer see (ChangeType.REMOVED) are not touched here: a product can be
-hidden behind another one, so removing it is handled with a tolerance in a separate step.
+Products the cameras no longer see (ChangeType.REMOVED) are not removed right away: a product can be
+hidden behind another one. It is removed only after it was missing from REMOVAL_TOLERANCE_EVENTS
+door events in a row (apply_removals).
 """
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -19,6 +20,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from inventory.diff import ChangeType, ProductChange
 from inventory.merge import SnapshotItem
 from models import Inventory, InventorySource
+
+# A product the cameras don't see is removed only after this many door events in a row without it
+REMOVAL_TOLERANCE_EVENTS = 2
 
 
 @dataclass
@@ -86,3 +90,20 @@ async def apply_quantities(db: AsyncSession, snapshot: dict[str, SnapshotItem], 
             if row.removed_at is None:
                 row.last_seen_at = seen_at
                 row.confidence = item.confidence
+                row.missed_events = 0
+
+
+async def apply_removals(db: AsyncSession, changes: list[ProductChange], event_time: datetime) -> None:
+    """Count one more miss for every product the cameras didn't see, and remove the products that
+    were missing from REMOVAL_TOLERANCE_EVENTS events in a row. The caller commits.
+    """
+    for change in changes:
+        if change.change != ChangeType.REMOVED:
+            continue
+        rows = (await db.execute(
+            select(Inventory).where(Inventory.product_name == change.product_name, Inventory.removed_at.is_(None))
+        )).scalars().all()
+        for row in rows:
+            row.missed_events += 1
+            if row.missed_events >= REMOVAL_TOLERANCE_EVENTS:
+                row.removed_at = event_time

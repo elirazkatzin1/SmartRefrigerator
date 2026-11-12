@@ -41,6 +41,9 @@ class Inventory(Base):
     expiration_source = Column(String, nullable=True)
     # Set when the product is taken out. Removed rows are kept for history and not shown as inventory
     removed_at = Column(DateTime, nullable=True, index=True)
+    # Door events in a row in which the cameras did not see this product. Back to 0 when it is seen;
+    # the product is removed only after several misses, since it may just be hidden behind another one
+    missed_events = Column(Integer, nullable=False, default=0, server_default="0")
 
 class ImageAnalysis(Base):
     """One row per uploaded camera image and the result of running the vision pipeline on it."""

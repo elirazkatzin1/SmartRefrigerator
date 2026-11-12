@@ -17,7 +17,8 @@ async def init_db():
                 ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP,
                 ADD COLUMN IF NOT EXISTS source VARCHAR NOT NULL DEFAULT 'manual',
                 ADD COLUMN IF NOT EXISTS expiration_source VARCHAR,
-                ADD COLUMN IF NOT EXISTS removed_at TIMESTAMP
+                ADD COLUMN IF NOT EXISTS removed_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS missed_events INTEGER NOT NULL DEFAULT 0
         """))
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_inventory_removed_at ON inventory (removed_at)"
