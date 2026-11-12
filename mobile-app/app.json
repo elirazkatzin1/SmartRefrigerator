@@ -2,6 +2,8 @@
   "expo": {
     "name": "mobile-app",
     "slug": "mobile-app",
+    "scheme": "smartfridge",
+    "plugins": ["expo-router"],
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
