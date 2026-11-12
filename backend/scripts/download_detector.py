@@ -3,7 +3,7 @@
 The weights are not in git (see docs/model_weights.md). Run inside the backend container:
     docker compose run --rm --no-deps web python -m scripts.download_detector [--tag model-v1]
 
-Without --tag it takes the newest release whose tag starts with "model-". The file is saved to
+Without --tag it takes the newest release whose tag starts with "model". The file is saved to
 storage/models/detector.pt; restart the server (docker compose restart web) to load it.
 """
 import argparse
@@ -13,7 +13,8 @@ import urllib.request
 from vision.detector import DETECTOR_WEIGHTS
 
 REPOSITORY = "elirazkatzin1/SmartRefrigerator"
-TAG_PREFIX = "model-"
+# Matches model-v2 as documented, and also modelv1, the tag of the first release
+TAG_PREFIX = "model"
 ASSET_NAME = "detector.pt"
 
 
@@ -34,7 +35,7 @@ def find_asset_url(tag: str | None) -> tuple[str, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--tag", help="release tag, e.g. model-v1 (default: the newest model- release)")
+    parser.add_argument("--tag", help="release tag, e.g. model-v2 (default: the newest model release)")
     args = parser.parse_args()
 
     tag, url = find_asset_url(args.tag)
