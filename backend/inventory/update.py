@@ -97,13 +97,16 @@ async def apply_quantities(db: AsyncSession, snapshot: dict[str, SnapshotItem], 
                 row.missed_events = 0
 
 
-async def apply_removals(db: AsyncSession, changes: list[ProductChange], event_time: datetime) -> None:
+async def apply_removals(db: AsyncSession, changes: list[ProductChange], event_time: datetime) -> set[str]:
     """Count one more miss for every product the cameras didn't see, and remove the products that
     were missing from REMOVAL_TOLERANCE_EVENTS events in a row. The caller commits.
+
+    Returns the names of the products that were removed in this event.
 
     Rows the user added manually are never removed automatically: the cameras may not see every
     part of the fridge, and the user's entry is trusted over a missing detection.
     """
+    removed = set()
     for change in changes:
         if change.change != ChangeType.REMOVED:
             continue
@@ -118,3 +121,5 @@ async def apply_removals(db: AsyncSession, changes: list[ProductChange], event_t
             row.missed_events += 1
             if row.missed_events >= REMOVAL_TOLERANCE_EVENTS:
                 row.removed_at = event_time
+                removed.add(change.product_name)
+    return removed

@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from analysis import analyze_upload
 from database import get_db
-from models import AnalysisStatus, DoorEvent, FridgeState, ImageAnalysis, Inventory
-from schemas import DoorStatusCreate, DoorStatusResponse, InventoryItemResponse
+from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory
+from schemas import DoorStatusCreate, DoorStatusResponse, EventAnalysisResponse, InventoryItemResponse
 from vision import detector
 
 
@@ -123,6 +123,27 @@ async def upload_image(
         "size": len(image_bytes),
         "taken_at": taken_at,
     }
+
+#מחזיר את הניתוח של סגירת הדלת האחרונה: התמונות, מה זוהה ומה השתנה במלאי
+@app.get("/api/v1/analysis/latest", response_model=EventAnalysisResponse)
+async def get_latest_analysis(db: AsyncSession = Depends(get_db)):
+    event = (await db.execute(
+        select(EventAnalysis).order_by(EventAnalysis.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="No door event has been analyzed yet")
+    images = (await db.execute(
+        select(ImageAnalysis).where(ImageAnalysis.event_id == event.event_id).order_by(ImageAnalysis.camera_id)
+    )).scalars().all()
+    return EventAnalysisResponse(
+        event_id=event.event_id,
+        analyzed_at=event.created_at,
+        camera_ids=event.camera_ids,
+        timed_out=event.timed_out,
+        images=images,
+        detections=event.snapshot,
+        changes=event.changes,
+    )
 
 #מחזיר את כל המוצרים שנמצאים כרגע במקרר
 @app.get("/api/v1/inventory", response_model=list[InventoryItemResponse])

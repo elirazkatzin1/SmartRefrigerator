@@ -11,11 +11,11 @@ from dataclasses import asdict
 from datetime import datetime
 
 from database import AsyncSessionLocal
-from inventory.diff import current_quantities, diff_inventory
+from inventory.diff import ChangeType, ProductChange, current_quantities, diff_inventory
 from inventory.event_collector import EventCollector, ReadyEvent
 from inventory.merge import build_snapshot
 from inventory.update import apply_quantities, apply_removals
-from models import AnalysisStatus, ImageAnalysis
+from models import AnalysisStatus, EventAnalysis, ImageAnalysis
 from vision.errors import ImageRejectedError
 from vision.pipeline import analyze_image
 
@@ -28,14 +28,32 @@ logger = logging.getLogger(__name__)
 _analysis_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="analysis")
 
 
+def _recorded_change(change: ProductChange, removed: set[str]) -> dict:
+    # A product the cameras didn't see is only removed after the tolerance, so the record tells
+    # "removed" (taken out of the inventory now) apart from "missing" (kept for now)
+    kind = change.change.value
+    if change.change == ChangeType.REMOVED and change.product_name not in removed:
+        kind = "missing"
+    return {"product_name": change.product_name, "change": kind,
+            "old_quantity": change.old_quantity, "new_quantity": change.new_quantity}
+
+
 async def sync_event(event: ReadyEvent) -> None:
-    """Merge the analyzed images of a door event and apply the changes to the inventory."""
+    """Merge the analyzed images of a door event, apply the changes to the inventory and record them."""
     async with AsyncSessionLocal() as db:
         snapshot = await build_snapshot(db, event.event_id)
         changes = diff_inventory(snapshot, await current_quantities(db))
         event_time = datetime.utcnow()
         await apply_quantities(db, snapshot, changes, event_time)
-        await apply_removals(db, changes, event_time)
+        removed = await apply_removals(db, changes, event_time)
+        db.add(EventAnalysis(
+            event_id=event.event_id,
+            camera_ids=sorted(event.camera_ids),
+            timed_out=event.timed_out,
+            snapshot=[{**asdict(item), "camera_ids": sorted(item.camera_ids)} for item in snapshot.values()],
+            changes=[_recorded_change(change, removed) for change in changes if change.change != ChangeType.UNCHANGED],
+            created_at=event_time,
+        ))
         await db.commit()
     print(f"Event {event.event_id}: inventory updated from cameras {sorted(event.camera_ids)}", flush=True)
 

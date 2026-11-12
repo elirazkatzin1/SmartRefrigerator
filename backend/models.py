@@ -67,6 +67,23 @@ class ImageAnalysis(Base):
     error = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
+class EventAnalysis(Base):
+    """One row per door-close event: the merged snapshot and what it changed in the inventory."""
+    __tablename__ = "event_analysis"
+
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String, nullable=False, unique=True)
+    # The cameras whose image was analyzed before the event was merged
+    camera_ids = Column(JSONB, nullable=False)
+    # True when merged after the timeout instead of with all cameras
+    timed_out = Column(Boolean, nullable=False, default=False)
+    # inventory.merge.SnapshotItem list: [{"product_name", "category", "quantity", "confidence", "camera_ids"}]
+    snapshot = Column(JSONB, nullable=False)
+    # [{"product_name", "change", "old_quantity", "new_quantity"}], change being added, quantity_changed,
+    # removed (taken out of the inventory) or missing (not seen, kept for now: it may be hidden)
+    changes = Column(JSONB, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 class FridgeState(Base):
     __tablename__ = "fridge_state"
 
