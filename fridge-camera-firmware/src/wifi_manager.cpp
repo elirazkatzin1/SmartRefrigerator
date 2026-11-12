@@ -3,10 +3,25 @@
 #include "wifi_manager.h"
 #include "config.h"
 
-#define WIFI_RETRY_INTERVAL_MS 10000
+// כשהדלת סגורה אין WiFi. ניסיון קצר כל כמה שניות, כדי להתחבר מהר ברגע שהדלת נפתחת
+// ולשלוח את מה שמחכה בתור עוד לפני שהיא נסגרת שוב
+#define WIFI_RETRY_INTERVAL_MS 5000
+// ניסיון רגיל פונה ישירות לערוץ ולנתב שהיינו מחוברים אליהם, בלי לסרוק את כל הערוצים.
+// זה מהיר יותר, וגם משאיר את הרדיו על הערוץ של ESP-NOW כדי לא לפספס שידור צילום.
+// סריקה מלאה רק מדי פעם, למקרה שהנתב החליף ערוץ
+#define WIFI_FULL_SCAN_INTERVAL_MS 300000
 
 static bool wifiConnected = false;
 static unsigned long lastReconnectAttempt = 0;
+static int32_t savedChannel = 0; // 0 = עוד לא התחברנו, אין ערוץ שמור
+static uint8_t savedBssid[6];
+static unsigned long lastFullScan = 0;
+
+static void rememberAccessPoint() {
+  savedChannel = WiFi.channel();
+  memcpy(savedBssid, WiFi.BSSID(), sizeof(savedBssid));
+  lastFullScan = millis();
+}
 
 void connectToWiFi() {
   Serial.println("=== Starting WiFi Connection ===");
@@ -32,6 +47,7 @@ void connectToWiFi() {
   Serial.println();
   wifiConnected = (WiFi.status() == WL_CONNECTED);
   if (wifiConnected) {
+    rememberAccessPoint();
     Serial.print("Connected! IP address: ");
     Serial.println(WiFi.localIP());
     Serial.printf("Signal strength (RSSI): %d dBm\n", WiFi.RSSI());
@@ -43,6 +59,7 @@ void checkWiFiConnection() {
   if (WiFi.status() == WL_CONNECTED) {
     if (!wifiConnected) {
       wifiConnected = true;
+      rememberAccessPoint();
       Serial.print("Reconnected! IP address: ");
       Serial.println(WiFi.localIP());
     }
@@ -58,8 +75,14 @@ void checkWiFiConnection() {
 
   if (millis() - lastReconnectAttempt >= WIFI_RETRY_INTERVAL_MS) {
     lastReconnectAttempt = millis();
-    Serial.println("Trying to reconnect to WiFi...");
     WiFi.disconnect();
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    if (savedChannel == 0 || millis() - lastFullScan >= WIFI_FULL_SCAN_INTERVAL_MS) {
+      lastFullScan = millis();
+      Serial.println("Trying to reconnect to WiFi (full scan)...");
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    } else {
+      Serial.printf("Trying to reconnect to WiFi (channel %d)...\n", savedChannel);
+      WiFi.begin(WIFI_SSID, WIFI_PASSWORD, savedChannel, savedBssid);
+    }
   }
 }
