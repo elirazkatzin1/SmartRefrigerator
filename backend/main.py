@@ -3,13 +3,14 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from analysis import analyze_upload
 from database import get_db
-from models import DoorEvent, FridgeState, Inventory
+from models import AnalysisStatus, DoorEvent, FridgeState, ImageAnalysis, Inventory
 from schemas import DoorStatusCreate, DoorStatusResponse, InventoryItemResponse
 from vision import detector
 
@@ -63,9 +64,10 @@ async def update_door_status(status: DoorStatusCreate, db: AsyncSession = Depend
     print(f"Door {'OPENED' if event.door_open else 'CLOSED'} (uptime {event.uptime_ms} ms)", flush=True)
     return event
 
-#מקבל תמונה כmultipart ושומר אותה בתיקייה storage/images/<event_id>
+#מקבל תמונה כmultipart, שומר אותה בתיקייה storage/images/<event_id> ומפעיל את הניתוח ברקע
 @app.post("/api/v1/fridge/upload-image", status_code=201)
 async def upload_image(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     camera_id: int = Form(..., ge=1, le=MAX_CAMERA_ID),
     # The pattern also keeps the id safe to use as a directory name
@@ -96,7 +98,21 @@ async def upload_image(
         state = FridgeState(id=FRIDGE_STATE_ID)
         db.add(state)
     state.last_image_taken = taken_at
+
+    # A camera re-sends an image when no response arrived, which overwrote the file above,
+    # so the existing row is analyzed again instead of adding a second one
+    analysis = (await db.execute(select(ImageAnalysis).where(ImageAnalysis.filename == filename))).scalar_one_or_none()
+    if analysis is None:
+        analysis = ImageAnalysis(filename=filename, camera_id=camera_id, event_id=event_id)
+        db.add(analysis)
+    else:
+        analysis.status = AnalysisStatus.PENDING.value
+        analysis.detections = None
+        analysis.error = None
     await db.commit()
+
+    # Runs after the response is sent, so the camera gets 201 right away
+    background_tasks.add_task(analyze_upload, analysis.id, str(IMAGES_DIR / filename))
 
     print(f"Saved image: {filename}, {len(image_bytes)} bytes", flush=True)
     return {

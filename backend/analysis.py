@@ -1,0 +1,60 @@
+"""Runs after an image upload: analyze the image, and once a door event is complete, update the inventory.
+
+    upload_image -> analyze_upload (background) -> ImageAnalysis row -> EventCollector
+                 -> sync_event (when all cameras are in, or after the timeout) -> Inventory
+"""
+import logging
+import time
+from dataclasses import asdict
+from datetime import datetime
+
+from fastapi.concurrency import run_in_threadpool
+
+from database import AsyncSessionLocal
+from inventory.diff import current_quantities, diff_inventory
+from inventory.event_collector import EventCollector, ReadyEvent
+from inventory.merge import build_snapshot
+from inventory.update import apply_quantities, apply_removals
+from models import AnalysisStatus, ImageAnalysis
+from vision.errors import ImageRejectedError
+from vision.pipeline import analyze_image
+
+logger = logging.getLogger(__name__)
+
+
+async def sync_event(event: ReadyEvent) -> None:
+    """Merge the analyzed images of a door event and apply the changes to the inventory."""
+    async with AsyncSessionLocal() as db:
+        snapshot = await build_snapshot(db, event.event_id)
+        changes = diff_inventory(snapshot, await current_quantities(db))
+        event_time = datetime.utcnow()
+        await apply_quantities(db, snapshot, changes, event_time)
+        await apply_removals(db, changes, event_time)
+        await db.commit()
+    print(f"Event {event.event_id}: inventory updated from cameras {sorted(event.camera_ids)}", flush=True)
+
+
+collector = EventCollector(sync_event)
+
+
+async def analyze_upload(analysis_id: int, path: str) -> None:
+    """Analyze one uploaded image and record the result in its ImageAnalysis row."""
+    async with AsyncSessionLocal() as db:
+        analysis = await db.get(ImageAnalysis, analysis_id)
+        analysis.status = AnalysisStatus.PROCESSING.value
+        await db.commit()
+
+        start = time.perf_counter()
+        try:
+            detections = await run_in_threadpool(analyze_image, path, analysis.camera_id)
+            analysis.detections = [asdict(detection) for detection in detections]
+            analysis.status = AnalysisStatus.DONE.value
+        except ImageRejectedError as error:
+            # A black or corrupted image: the event is still merged from the other cameras
+            analysis.error = str(error)
+            analysis.status = AnalysisStatus.FAILED.value
+        analysis.processing_time_ms = round((time.perf_counter() - start) * 1000)
+        await db.commit()
+        event_id, camera_id = analysis.event_id, analysis.camera_id
+
+    await collector.image_analyzed(event_id, camera_id)

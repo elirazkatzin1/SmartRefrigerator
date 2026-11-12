@@ -1,18 +1,18 @@
-from dataclasses import dataclass
 from pathlib import Path
 
-from vision.detector import Detection
+from vision.calibration import undistort
+from vision.detector import Detection, detect
+from vision.preprocess import load_image
 
 
-@dataclass
-class ProductResult:
-    detection: Detection
-    brand: str | None
+def analyze_image(path: str | Path, camera_id: int | None = None) -> list[Detection]:
+    """Run the pipeline on one uploaded image: load and validate -> correct the lens -> detect.
 
+    Detection runs on the image before preprocess.enhance: the detector is trained on raw images, and
+    a model trained on enhanced images did worse (docs/model_evaluation.md). Reading brands or dates
+    with OCR is left out for now, since it could not read them from fridge images.
 
-def analyze_image(path: str | Path) -> list[ProductResult]:
-    """Run the full pipeline on one uploaded image: preprocess -> detect -> crop -> OCR.
-
-    Black or corrupted images are logged and return an empty list instead of raising.
+    Raises ImageRejectedError for black or corrupted images.
     """
-    raise NotImplementedError
+    image = undistort(load_image(path), camera_id)
+    return detect(image)
