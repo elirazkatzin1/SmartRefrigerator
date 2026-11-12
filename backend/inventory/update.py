@@ -73,8 +73,12 @@ async def apply_quantities(db: AsyncSession, snapshot: dict[str, SnapshotItem], 
             ))
             db.add(rows[-1])
         elif added < 0:
+            # Manual rows are never removed automatically, so only rows the cameras added are taken from.
+            # If the cameras see fewer items than the manual rows hold, the manual rows stay as they are
             new_quantities = take_from_rows(
-                [RowQuantity(row.id, row.quantity, row.expiration_date, row.added_at) for row in rows], -added
+                [RowQuantity(row.id, row.quantity, row.expiration_date, row.added_at)
+                 for row in rows if row.source != InventorySource.MANUAL.value],
+                -added,
             )
             for row in rows:
                 if row.id not in new_quantities:
@@ -96,12 +100,19 @@ async def apply_quantities(db: AsyncSession, snapshot: dict[str, SnapshotItem], 
 async def apply_removals(db: AsyncSession, changes: list[ProductChange], event_time: datetime) -> None:
     """Count one more miss for every product the cameras didn't see, and remove the products that
     were missing from REMOVAL_TOLERANCE_EVENTS events in a row. The caller commits.
+
+    Rows the user added manually are never removed automatically: the cameras may not see every
+    part of the fridge, and the user's entry is trusted over a missing detection.
     """
     for change in changes:
         if change.change != ChangeType.REMOVED:
             continue
         rows = (await db.execute(
-            select(Inventory).where(Inventory.product_name == change.product_name, Inventory.removed_at.is_(None))
+            select(Inventory).where(
+                Inventory.product_name == change.product_name,
+                Inventory.removed_at.is_(None),
+                Inventory.source != InventorySource.MANUAL.value,
+            )
         )).scalars().all()
         for row in rows:
             row.missed_events += 1
