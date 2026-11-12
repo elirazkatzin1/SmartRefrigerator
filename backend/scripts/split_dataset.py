@@ -7,20 +7,26 @@ Reads storage/dataset/images and labels and writes storage/yolo/{train,val,test}
 plus storage/yolo/data.yaml. storage/yolo is rebuilt from scratch on every run, so run it again
 after importing more images.
 
+With --enhance, every image goes through vision.preprocess.enhance (denoise, lighting, sharpen),
+the same step the pipeline runs before detection, so the model is trained on what it will see.
+
 Every class should appear in all three sets. Images are assigned rarest class first, each to the set
 missing the most of its classes, before the 70/20/10 ratio is considered. A class with fewer than
 3 images cannot be in all three sets, so the classes still missing from a set are listed.
 All the images of one door-close event (the cameras' views of the same scene) go to the same set,
 otherwise the model is evaluated on scenes it was trained on.
 """
+import argparse
 import random
 import re
 import shutil
 from collections import Counter, defaultdict
 from pathlib import Path
 
+import cv2
 import yaml
 
+from vision.preprocess import enhance, load_image
 from vision.products import PRODUCTS, yolo_class_names
 
 STORAGE_DIR = Path(__file__).resolve().parent.parent / "storage"
@@ -31,6 +37,8 @@ SPLITS = {"train": 0.7, "val": 0.2, "test": 0.1}
 SEED = 0
 # Camera images are named <event_id>_cam<N> by `annotations prepare`
 EVENT_ID = re.compile(r"^([0-9a-f]{16})_cam\d")
+# Enhanced images are saved as JPEG again: high quality, so the compression adds little
+ENHANCED_JPEG_QUALITY = 95
 
 
 def group_key(image: Path) -> str:
@@ -94,7 +102,21 @@ def repair_coverage(assignment: dict, group_classes: dict, groups: dict, have: d
                     break
 
 
+def copy_image(source: Path, target: Path, enhanced: bool) -> None:
+    if not enhanced:
+        shutil.copy2(source, target)
+        return
+    # Lens correction (undistort) is not applied: it moves pixels, so the boxes labeled on the
+    # raw image would no longer match. enhance() only changes pixel values
+    image = enhance(load_image(source))
+    cv2.imwrite(str(target.with_suffix(".jpg")), image, [cv2.IMWRITE_JPEG_QUALITY, ENHANCED_JPEG_QUALITY])
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--enhance", action="store_true", help="run vision.preprocess.enhance on every image")
+    args = parser.parse_args()
+
     images = sorted(path for path in (DATASET_DIR / "images").iterdir() if path.suffix.lower() in (".jpg", ".jpeg", ".png"))
     if not images:
         print(f"No images in storage/{DATASET_DIR.name}/images. Run `python -m scripts.annotations import` first")
@@ -130,18 +152,21 @@ def main() -> None:
     shutil.rmtree(YOLO_DIR, ignore_errors=True)
     for key, split in assignment.items():
         for image in groups[key]:
-            for kind, source in (("images", image), ("labels", DATASET_DIR / "labels" / f"{image.stem}.txt")):
-                target_dir = YOLO_DIR / split / kind
-                target_dir.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(source, target_dir / source.name)
+            for kind in ("images", "labels"):
+                (YOLO_DIR / split / kind).mkdir(parents=True, exist_ok=True)
+            copy_image(image, YOLO_DIR / split / "images" / image.name, args.enhance)
+            label = DATASET_DIR / "labels" / f"{image.stem}.txt"
+            shutil.copy2(label, YOLO_DIR / split / "labels" / label.name)
 
     # No `path` key: Ultralytics then resolves train/val/test relative to this file,
     # so the folder can be uploaded to Colab as is
     data = {split: f"{split}/images" for split in SPLITS}
     data["names"] = dict(enumerate(yolo_class_names()))
+    # Not used by Ultralytics: records how the images were prepared, so the pipeline can match it
+    data["enhanced"] = args.enhance
     (YOLO_DIR / "data.yaml").write_text(yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
-    print(f"Wrote storage/{YOLO_DIR.name}: " + ", ".join(
+    print(f"Wrote storage/{YOLO_DIR.name}{' (enhanced)' if args.enhance else ''}: " + ", ".join(
         f"{split} {images_per_split[split]} images ({images_per_split[split] / len(images):.0%})" for split in SPLITS
     ))
     print(f"\n{'class':<20}" + "".join(f"{split:>8}" for split in SPLITS))
