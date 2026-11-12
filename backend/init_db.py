@@ -23,6 +23,7 @@ async def init_db():
         await conn.execute(text(
             "CREATE INDEX IF NOT EXISTS ix_inventory_removed_at ON inventory (removed_at)"
         ))
+        await conn.execute(text("ALTER TABLE event_analysis ADD COLUMN IF NOT EXISTS error VARCHAR"))
         # expiration_date used to be a string column; convert it so it can be compared as a date
         await conn.execute(text("""
             DO $$

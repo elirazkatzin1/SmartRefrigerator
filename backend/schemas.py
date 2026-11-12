@@ -65,6 +65,8 @@ class EventAnalysisResponse(BaseModel):
     # The merged detections of all cameras: one item per product
     detections: list[SnapshotItemResponse]
     changes: list[InventoryChangeResponse]
+    # Set when updating the inventory failed: it was left unchanged, and detections/changes are empty
+    error: Optional[str] = None
 
 
 class InventoryItemResponse(BaseModel):

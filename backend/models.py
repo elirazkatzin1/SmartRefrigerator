@@ -82,6 +82,8 @@ class EventAnalysis(Base):
     # [{"product_name", "change", "old_quantity", "new_quantity"}], change being added, quantity_changed,
     # removed (taken out of the inventory) or missing (not seen, kept for now: it may be hidden)
     changes = Column(JSONB, nullable=False)
+    # Set when updating the inventory failed; the inventory was left unchanged and snapshot/changes are empty
+    error = Column(String, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 class FridgeState(Base):

@@ -10,6 +10,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import datetime
 
+from sqlalchemy import update
+
 from database import AsyncSessionLocal
 from inventory.diff import ChangeType, ProductChange, current_quantities, diff_inventory
 from inventory.event_collector import EventCollector, ReadyEvent
@@ -38,8 +40,31 @@ def _recorded_change(change: ProductChange, removed: set[str]) -> dict:
             "old_quantity": change.old_quantity, "new_quantity": change.new_quantity}
 
 
+def _describe(error: Exception) -> str:
+    return f"{type(error).__name__}: {error}"
+
+
 async def sync_event(event: ReadyEvent) -> None:
-    """Merge the analyzed images of a door event, apply the changes to the inventory and record them."""
+    """Merge the analyzed images of a door event, apply the changes to the inventory and record them.
+
+    If any step fails, nothing of the inventory update is committed (the session rolls back), so the
+    existing inventory doesn't change, and the event is recorded with the error instead.
+    """
+    try:
+        await _update_inventory(event)
+    except Exception as error:
+        logger.exception("Event %s: inventory update failed, inventory left unchanged", event.event_id)
+        try:
+            async with AsyncSessionLocal() as db:
+                db.add(EventAnalysis(event_id=event.event_id, camera_ids=sorted(event.camera_ids),
+                                     timed_out=event.timed_out, snapshot=[], changes=[], error=_describe(error)))
+                await db.commit()
+        except Exception:
+            # E.g. the database itself is down: the log above is all that can be done
+            logger.exception("Event %s: could not record the failure", event.event_id)
+
+
+async def _update_inventory(event: ReadyEvent) -> None:
     async with AsyncSessionLocal() as db:
         snapshot = await build_snapshot(db, event.event_id)
         changes = diff_inventory(snapshot, await current_quantities(db))
@@ -69,7 +94,22 @@ def _timed_analyze(path: str, camera_id: int) -> tuple[list, int]:
 
 
 async def analyze_upload(analysis_id: int, path: str) -> None:
-    """Analyze one uploaded image and record the result in its ImageAnalysis row."""
+    """Analyze one uploaded image and record the result in its ImageAnalysis row.
+
+    Runs as a background task, so it never raises: a failed analysis is marked failed with the error,
+    and the door event goes on with the other cameras.
+    """
+    try:
+        event_id, camera_id = await _analyze(analysis_id, path)
+    except Exception:
+        # The row itself couldn't be read or saved (e.g. the database is down). The event is still
+        # merged from the other cameras after the timeout
+        logger.exception("Image analysis %d: could not be run or recorded", analysis_id)
+        return
+    await collector.image_analyzed(event_id, camera_id)
+
+
+async def _analyze(analysis_id: int, path: str) -> tuple[str, int]:
     async with AsyncSessionLocal() as db:
         analysis = await db.get(ImageAnalysis, analysis_id)
         analysis.status = AnalysisStatus.PROCESSING.value
@@ -82,10 +122,29 @@ async def analyze_upload(analysis_id: int, path: str) -> None:
             analysis.detections = [asdict(detection) for detection in detections]
             analysis.status = AnalysisStatus.DONE.value
         except ImageRejectedError as error:
-            # A black or corrupted image: the event is still merged from the other cameras
+            # A black or corrupted image (already logged by preprocess)
             analysis.error = str(error)
             analysis.status = AnalysisStatus.FAILED.value
+        except Exception as error:
+            # Anything else, e.g. no trained model or an OpenCV error
+            logger.exception("Image analysis %d (%s) failed", analysis_id, analysis.filename)
+            analysis.error = _describe(error)
+            analysis.status = AnalysisStatus.FAILED.value
         await db.commit()
-        event_id, camera_id = analysis.event_id, analysis.camera_id
+        return analysis.event_id, analysis.camera_id
 
-    await collector.image_analyzed(event_id, camera_id)
+
+async def fail_interrupted_analyses() -> None:
+    """Mark analyses left pending or processing by a server restart as failed, so none stay stuck.
+
+    Called on startup, before new images arrive.
+    """
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            update(ImageAnalysis)
+            .where(ImageAnalysis.status.in_([AnalysisStatus.PENDING.value, AnalysisStatus.PROCESSING.value]))
+            .values(status=AnalysisStatus.FAILED.value, error="The server restarted before the analysis finished")
+        )
+        await db.commit()
+    if result.rowcount:
+        logger.warning("Marked %d analyses interrupted by a restart as failed", result.rowcount)

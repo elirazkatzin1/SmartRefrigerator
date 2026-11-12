@@ -9,7 +9,7 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from analysis import analyze_upload
+from analysis import analyze_upload, fail_interrupted_analyses
 from database import get_db
 from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory
 from schemas import DoorStatusCreate, DoorStatusResponse, EventAnalysisResponse, InventoryItemResponse
@@ -30,6 +30,8 @@ async def lifespan(app: FastAPI):
         # The server still starts without a trained model, so the cameras can keep uploading
         # images (which are needed to train one). Detection fails until the weights exist
         print(f"WARNING: {error}", flush=True)
+    # Analyses a restart cut off would otherwise stay "processing" forever
+    await fail_interrupted_analyses()
     yield
 
 
@@ -148,6 +150,7 @@ async def get_latest_analysis(db: AsyncSession = Depends(get_db)):
         images=images,
         detections=event.snapshot,
         changes=event.changes,
+        error=event.error,
     )
 
 def _annotated_jpeg(path: Path, camera_id: int, detections: list[dict]) -> bytes:
