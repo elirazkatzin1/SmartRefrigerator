@@ -1,5 +1,6 @@
 """Product detection with the YOLO model trained by scripts/train_detector.py."""
 import logging
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +14,14 @@ logger = logging.getLogger(__name__)
 
 # Written by scripts/train_detector.py. Not in git (storage/ is ignored)
 DETECTOR_WEIGHTS = Path(__file__).resolve().parent.parent / "storage" / "models" / "detector.pt"
+# Detections below this confidence are dropped. Can be set with DETECTION_CONFIDENCE (0-1)
+DEFAULT_CONFIDENCE = float(os.getenv("DETECTION_CONFIDENCE", "0.5"))
+# NMS: of two boxes overlapping by more than this IoU, only the more confident one is kept.
+# Ultralytics' default of 0.7 kept duplicate boxes of one product at 0.6-0.65 IoU
+NMS_IOU = float(os.getenv("DETECTION_NMS_IOU", "0.5"))
+# NMS across classes too: the model sometimes gives one product two classes in the same place
+# (mustard + pesto at 0.81 IoU, cooking_cream + hummus at 0.97), which per-class NMS keeps both of
+NMS_ACROSS_CLASSES = True
 
 
 @dataclass
@@ -36,13 +45,14 @@ def _load_model() -> YOLO:
     return YOLO(str(DETECTOR_WEIGHTS))
 
 
-def detect(image: np.ndarray) -> list[Detection]:
+def detect(image: np.ndarray, confidence: float = DEFAULT_CONFIDENCE) -> list[Detection]:
     """Find the products in a BGR image (as loaded by OpenCV) with the trained YOLO model.
 
+    Detections below `confidence` are dropped, and duplicate boxes are removed with NMS.
     The model is loaded on the first call and reused afterwards.
     """
     model = _load_model()
-    result = model.predict(image, verbose=False)[0]
+    result = model.predict(image, conf=confidence, iou=NMS_IOU, agnostic_nms=NMS_ACROSS_CLASSES, verbose=False)[0]
 
     detections = []
     for class_id, confidence, box in zip(result.boxes.cls.tolist(), result.boxes.conf.tolist(),
