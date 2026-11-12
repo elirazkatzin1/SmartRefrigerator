@@ -44,7 +44,8 @@ def load_model() -> YOLO:
     """
     if not DETECTOR_WEIGHTS.exists():
         raise FileNotFoundError(
-            f"No trained model at {DETECTOR_WEIGHTS}. Train one with `python -m scripts.train_detector`"
+            f"No trained model at {DETECTOR_WEIGHTS}. Download the current one with "
+            f"`python -m scripts.download_detector` (see docs/model_weights.md)"
         )
     logger.info("Loading detector weights from %s", DETECTOR_WEIGHTS)
     model = YOLO(str(DETECTOR_WEIGHTS))

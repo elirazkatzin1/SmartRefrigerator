@@ -219,3 +219,6 @@ __marimo__/
 
 # Uploaded fridge images
 backend/storage/
+
+# Model weights (YOLO .pt files): published as GitHub Release assets, see backend/docs/model_weights.md
+*.pt
