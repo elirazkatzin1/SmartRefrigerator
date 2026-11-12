@@ -3,12 +3,12 @@
     upload_image -> analyze_upload (background) -> ImageAnalysis row -> EventCollector
                  -> sync_event (when all cameras are in, or after the timeout) -> Inventory
 """
+import asyncio
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from datetime import datetime
-
-from fastapi.concurrency import run_in_threadpool
 
 from database import AsyncSessionLocal
 from inventory.diff import current_quantities, diff_inventory
@@ -20,6 +20,12 @@ from vision.errors import ImageRejectedError
 from vision.pipeline import analyze_image
 
 logger = logging.getLogger(__name__)
+
+# The image analysis (YOLO inference) is CPU-bound, so it runs off the event loop to keep the server
+# answering other requests. It runs in one dedicated thread, one image at a time: an Ultralytics model
+# is not safe to use from several threads at once, and the cameras of a door event upload together.
+# Images wait in this executor's queue; at ~0.2 s each, a 5-camera event takes about a second
+_analysis_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="analysis")
 
 
 async def sync_event(event: ReadyEvent) -> None:
@@ -37,6 +43,13 @@ async def sync_event(event: ReadyEvent) -> None:
 collector = EventCollector(sync_event)
 
 
+def _timed_analyze(path: str, camera_id: int) -> tuple[list, int]:
+    # Timed inside the analysis thread, so the time an image waited in the queue isn't included
+    start = time.perf_counter()
+    detections = analyze_image(path, camera_id)
+    return detections, round((time.perf_counter() - start) * 1000)
+
+
 async def analyze_upload(analysis_id: int, path: str) -> None:
     """Analyze one uploaded image and record the result in its ImageAnalysis row."""
     async with AsyncSessionLocal() as db:
@@ -44,16 +57,16 @@ async def analyze_upload(analysis_id: int, path: str) -> None:
         analysis.status = AnalysisStatus.PROCESSING.value
         await db.commit()
 
-        start = time.perf_counter()
         try:
-            detections = await run_in_threadpool(analyze_image, path, analysis.camera_id)
+            detections, analysis.processing_time_ms = await asyncio.get_running_loop().run_in_executor(
+                _analysis_executor, _timed_analyze, path, analysis.camera_id
+            )
             analysis.detections = [asdict(detection) for detection in detections]
             analysis.status = AnalysisStatus.DONE.value
         except ImageRejectedError as error:
             # A black or corrupted image: the event is still merged from the other cameras
             analysis.error = str(error)
             analysis.status = AnalysisStatus.FAILED.value
-        analysis.processing_time_ms = round((time.perf_counter() - start) * 1000)
         await db.commit()
         event_id, camera_id = analysis.event_id, analysis.camera_id
 
