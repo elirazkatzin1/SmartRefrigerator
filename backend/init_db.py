@@ -10,6 +10,20 @@ async def init_db():
         await conn.execute(text(
             "ALTER TABLE fridge_state ADD COLUMN IF NOT EXISTS last_image_taken TIMESTAMP"
         ))
+        await conn.execute(text("""
+            ALTER TABLE inventory
+                ADD COLUMN IF NOT EXISTS quantity INTEGER NOT NULL DEFAULT 1,
+                ADD COLUMN IF NOT EXISTS confidence DOUBLE PRECISION,
+                ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS source VARCHAR NOT NULL DEFAULT 'manual',
+                ADD COLUMN IF NOT EXISTS expiration_source VARCHAR,
+                ADD COLUMN IF NOT EXISTS removed_at TIMESTAMP,
+                ADD COLUMN IF NOT EXISTS missed_events INTEGER NOT NULL DEFAULT 0
+        """))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_inventory_removed_at ON inventory (removed_at)"
+        ))
+        await conn.execute(text("ALTER TABLE event_analysis ADD COLUMN IF NOT EXISTS error VARCHAR"))
         # expiration_date used to be a string column; convert it so it can be compared as a date
         await conn.execute(text("""
             DO $$

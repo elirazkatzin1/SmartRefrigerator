@@ -1,18 +1,47 @@
+import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+import cv2
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from analysis import analyze_upload, fail_interrupted_analyses
 from database import get_db
-from models import DoorEvent, FridgeState, Inventory
-from schemas import DoorStatusCreate, DoorStatusResponse, InventoryItemResponse
+from log import configure_logging, log
+from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory
+from schemas import DoorStatusCreate, DoorStatusResponse, EventAnalysisResponse, InventoryItemResponse
+from vision import detector
+from vision.calibration import undistort
+from vision.draw import draw_detections
+from vision.errors import ImageRejectedError
+from vision.preprocess import load_image
+
+configure_logging()
+logger = logging.getLogger("main")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Load the YOLO weights once on startup, not on every request
+    try:
+        await run_in_threadpool(detector.load_model)
+        log(logger, "detector loaded", weights=detector.DETECTOR_WEIGHTS)
+    except FileNotFoundError as error:
+        # The server still starts without a trained model, so the cameras can keep uploading
+        # images (which are needed to train one). Detection fails until the weights exist
+        log(logger, str(error), logging.WARNING)
+    # Analyses a restart cut off would otherwise stay "processing" forever
+    await fail_interrupted_analyses()
+    yield
+
 
 # Initializing the FastAPI application
-app = FastAPI(title="VISION Smart Refrigerator API")
+app = FastAPI(title="VISION Smart Refrigerator API", lifespan=lifespan)
 
 # Images are stored next to this file, so in Docker they land in backend/storage/images on the host
 IMAGES_DIR = Path(__file__).parent / "storage" / "images"
@@ -44,12 +73,13 @@ async def update_door_status(status: DoorStatusCreate, db: AsyncSession = Depend
     db.add(event)
     await db.commit()
     await db.refresh(event)
-    print(f"Door {'OPENED' if event.door_open else 'CLOSED'} (uptime {event.uptime_ms} ms)", flush=True)
+    log(logger, "door opened" if event.door_open else "door closed", uptime_ms=event.uptime_ms)
     return event
 
-#מקבל תמונה כmultipart ושומר אותה בתיקייה storage/images/<event_id>
+#מקבל תמונה כmultipart, שומר אותה בתיקייה storage/images/<event_id> ומפעיל את הניתוח ברקע
 @app.post("/api/v1/fridge/upload-image", status_code=201)
 async def upload_image(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     camera_id: int = Form(..., ge=1, le=MAX_CAMERA_ID),
     # The pattern also keeps the id safe to use as a directory name
@@ -80,9 +110,23 @@ async def upload_image(
         state = FridgeState(id=FRIDGE_STATE_ID)
         db.add(state)
     state.last_image_taken = taken_at
+
+    # A camera re-sends an image when no response arrived, which overwrote the file above,
+    # so the existing row is analyzed again instead of adding a second one
+    analysis = (await db.execute(select(ImageAnalysis).where(ImageAnalysis.filename == filename))).scalar_one_or_none()
+    if analysis is None:
+        analysis = ImageAnalysis(filename=filename, camera_id=camera_id, event_id=event_id)
+        db.add(analysis)
+    else:
+        analysis.status = AnalysisStatus.PENDING.value
+        analysis.detections = None
+        analysis.error = None
     await db.commit()
 
-    print(f"Saved image: {filename}, {len(image_bytes)} bytes", flush=True)
+    # Runs after the response is sent, so the camera gets 201 right away
+    background_tasks.add_task(analyze_upload, analysis.id, str(IMAGES_DIR / filename))
+
+    log(logger, "image uploaded", event_id=event_id, camera_id=camera_id, bytes=len(image_bytes))
     return {
         "message": "OK",
         "filename": filename,
@@ -92,10 +136,59 @@ async def upload_image(
         "taken_at": taken_at,
     }
 
+#מחזיר את הניתוח של סגירת הדלת האחרונה: התמונות, מה זוהה ומה השתנה במלאי
+@app.get("/api/v1/analysis/latest", response_model=EventAnalysisResponse)
+async def get_latest_analysis(db: AsyncSession = Depends(get_db)):
+    event = (await db.execute(
+        select(EventAnalysis).order_by(EventAnalysis.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if event is None:
+        raise HTTPException(status_code=404, detail="No door event has been analyzed yet")
+    images = (await db.execute(
+        select(ImageAnalysis).where(ImageAnalysis.event_id == event.event_id).order_by(ImageAnalysis.camera_id)
+    )).scalars().all()
+    return EventAnalysisResponse(
+        event_id=event.event_id,
+        analyzed_at=event.created_at,
+        camera_ids=event.camera_ids,
+        timed_out=event.timed_out,
+        images=images,
+        detections=event.snapshot,
+        changes=event.changes,
+        error=event.error,
+    )
+
+def _annotated_jpeg(path: Path, camera_id: int, detections: list[dict]) -> bytes:
+    # The boxes are in the coordinates of the lens-corrected image the detector saw
+    image = undistort(load_image(path), camera_id)
+    ok, encoded = cv2.imencode(".jpg", draw_detections(image, detections), [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return encoded.tobytes()
+
+#מחזיר את התמונה עם המלבנים והשמות של מה שזוהה בה
+@app.get("/api/v1/analysis/{analysis_id}/image", response_class=Response,
+         responses={200: {"content": {"image/jpeg": {}}}})
+async def get_analysis_image(analysis_id: int, db: AsyncSession = Depends(get_db)):
+    analysis = await db.get(ImageAnalysis, analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail=f"No image analysis with id {analysis_id}")
+    path = IMAGES_DIR / analysis.filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Image file {analysis.filename} no longer exists")
+    try:
+        # Decoding and drawing are CPU work, so they run off the event loop
+        jpeg = await run_in_threadpool(_annotated_jpeg, path, analysis.camera_id, analysis.detections or [])
+    except ImageRejectedError:
+        # A black or corrupted image (its analysis failed): there is nothing to draw on, return it as is
+        jpeg = await run_in_threadpool(path.read_bytes)
+    return Response(content=jpeg, media_type="image/jpeg")
+
 #מחזיר את כל המוצרים שנמצאים כרגע במקרר
 @app.get("/api/v1/inventory", response_model=list[InventoryItemResponse])
 async def get_inventory(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Inventory).order_by(Inventory.added_at.desc()))
+    # Products that were taken out keep their row (removed_at is set) but are no longer inventory
+    result = await db.execute(
+        select(Inventory).where(Inventory.removed_at.is_(None)).order_by(Inventory.added_at.desc())
+    )
     return result.scalars().all()
 
 #מחזיר מוצרים שתאריך התפוגה שלהם לפני היום
@@ -104,7 +197,7 @@ async def get_expired_inventory(db: AsyncSession = Depends(get_db)):
     today = datetime.now(LOCAL_TZ).date()
     result = await db.execute(
         select(Inventory)
-        .where(Inventory.expiration_date < today)
+        .where(Inventory.expiration_date < today, Inventory.removed_at.is_(None))
         .order_by(Inventory.expiration_date)
     )
     return result.scalars().all()
