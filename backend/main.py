@@ -111,7 +111,10 @@ async def upload_image(
 #מחזיר את כל המוצרים שנמצאים כרגע במקרר
 @app.get("/api/v1/inventory", response_model=list[InventoryItemResponse])
 async def get_inventory(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Inventory).order_by(Inventory.added_at.desc()))
+    # Products that were taken out keep their row (removed_at is set) but are no longer inventory
+    result = await db.execute(
+        select(Inventory).where(Inventory.removed_at.is_(None)).order_by(Inventory.added_at.desc())
+    )
     return result.scalars().all()
 
 #מחזיר מוצרים שתאריך התפוגה שלהם לפני היום
@@ -120,7 +123,7 @@ async def get_expired_inventory(db: AsyncSession = Depends(get_db)):
     today = datetime.now(LOCAL_TZ).date()
     result = await db.execute(
         select(Inventory)
-        .where(Inventory.expiration_date < today)
+        .where(Inventory.expiration_date < today, Inventory.removed_at.is_(None))
         .order_by(Inventory.expiration_date)
     )
     return result.scalars().all()

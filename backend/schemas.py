@@ -28,3 +28,9 @@ class InventoryItemResponse(BaseModel):
     category: Optional[str] = None
     expiration_date: Optional[date] = None
     added_at: datetime
+    quantity: int
+    confidence: Optional[float] = None
+    last_seen_at: Optional[datetime] = None
+    source: Literal["ai", "manual"]
+    expiration_source: Optional[Literal["ocr", "estimated", "manual"]] = None
+    removed_at: Optional[datetime] = None
