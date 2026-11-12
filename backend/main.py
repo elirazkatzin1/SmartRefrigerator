@@ -3,7 +3,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, UploadFile
+import cv2
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,10 @@ from database import get_db
 from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory
 from schemas import DoorStatusCreate, DoorStatusResponse, EventAnalysisResponse, InventoryItemResponse
 from vision import detector
+from vision.calibration import undistort
+from vision.draw import draw_detections
+from vision.errors import ImageRejectedError
+from vision.preprocess import load_image
 
 
 @asynccontextmanager
@@ -144,6 +149,30 @@ async def get_latest_analysis(db: AsyncSession = Depends(get_db)):
         detections=event.snapshot,
         changes=event.changes,
     )
+
+def _annotated_jpeg(path: Path, camera_id: int, detections: list[dict]) -> bytes:
+    # The boxes are in the coordinates of the lens-corrected image the detector saw
+    image = undistort(load_image(path), camera_id)
+    ok, encoded = cv2.imencode(".jpg", draw_detections(image, detections), [cv2.IMWRITE_JPEG_QUALITY, 90])
+    return encoded.tobytes()
+
+#מחזיר את התמונה עם המלבנים והשמות של מה שזוהה בה
+@app.get("/api/v1/analysis/{analysis_id}/image", response_class=Response,
+         responses={200: {"content": {"image/jpeg": {}}}})
+async def get_analysis_image(analysis_id: int, db: AsyncSession = Depends(get_db)):
+    analysis = await db.get(ImageAnalysis, analysis_id)
+    if analysis is None:
+        raise HTTPException(status_code=404, detail=f"No image analysis with id {analysis_id}")
+    path = IMAGES_DIR / analysis.filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Image file {analysis.filename} no longer exists")
+    try:
+        # Decoding and drawing are CPU work, so they run off the event loop
+        jpeg = await run_in_threadpool(_annotated_jpeg, path, analysis.camera_id, analysis.detections or [])
+    except ImageRejectedError:
+        # A black or corrupted image (its analysis failed): there is nothing to draw on, return it as is
+        jpeg = await run_in_threadpool(path.read_bytes)
+    return Response(content=jpeg, media_type="image/jpeg")
 
 #מחזיר את כל המוצרים שנמצאים כרגע במקרר
 @app.get("/api/v1/inventory", response_model=list[InventoryItemResponse])
