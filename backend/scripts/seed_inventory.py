@@ -1,4 +1,5 @@
-"""Add sample products to the inventory so the app has something to show during development.
+"""Add sample products to the inventory (and a few shopping list items) so the app has something to
+show during development.
 
 Expiration dates are relative to today, so every freshness color (fresh, expiring soon,
 expired, no date) always appears. The items use real product names and categories from
@@ -7,7 +8,8 @@ Run inside the backend container:
     docker compose exec web python -m scripts.seed_inventory          # add the sample items
     docker compose exec web python -m scripts.seed_inventory --clear  # remove them again
 
---clear deletes only manual rows named like the sample items, never camera detections.
+--clear deletes only manual rows named like the sample items, never camera detections, and only
+the shopping list items named like the sample ones.
 """
 import asyncio
 import sys
@@ -17,7 +19,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import delete
 
 from database import AsyncSessionLocal
-from models import ExpirationSource, Inventory, InventorySource
+from models import ExpirationSource, Inventory, InventorySource, ShoppingItem, ShoppingItemSource
 from vision.products import category_of
 
 # Same as main.LOCAL_TZ: expiration dates are Israel-local dates
@@ -43,6 +45,13 @@ SAMPLE_NAMES = [name for name, *_ in SAMPLE_ITEMS]
 # These have a date "copied from the package"; the rest have an estimated one, as the cameras' products will (SR-123)
 MANUAL_DATES = {"milk", "yogurt"}
 
+# Shopping list samples (SR-94): (name, catalog product_name or None, source)
+SAMPLE_SHOPPING = [
+    ("Bread", None, ShoppingItemSource.MANUAL),
+    ("Olive oil", None, ShoppingItemSource.MANUAL),
+    ("Mayonnaise", "mayonnaise", ShoppingItemSource.AUTO),
+]
+
 
 async def clear_samples(db):
     await db.execute(
@@ -51,6 +60,7 @@ async def clear_samples(db):
             Inventory.source == InventorySource.MANUAL.value,
         )
     )
+    await db.execute(delete(ShoppingItem).where(ShoppingItem.name.in_([name for name, *_ in SAMPLE_SHOPPING])))
 
 
 async def seed():
@@ -74,8 +84,10 @@ async def seed():
                                    else ExpirationSource.ESTIMATED.value),
                 source=InventorySource.MANUAL.value,
             ))
+        for name, product_name, source in SAMPLE_SHOPPING:
+            db.add(ShoppingItem(name=name, product_name=product_name, source=source.value))
         await db.commit()
-    print(f"Added {len(SAMPLE_ITEMS)} sample items.")
+    print(f"Added {len(SAMPLE_ITEMS)} sample items and {len(SAMPLE_SHOPPING)} shopping list items.")
 
 
 async def clear():

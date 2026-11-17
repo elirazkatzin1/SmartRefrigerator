@@ -102,3 +102,25 @@ class DoorEvent(Base):
     # millis() on the ESP32 is an unsigned 32-bit value, which overflows a signed Integer
     uptime_ms = Column(BigInteger, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
+class ShoppingItemSource(str, Enum):
+    # Typed by the user, or added because a product they keep buying ran out (SR-94)
+    MANUAL = "manual"
+    AUTO = "auto"
+
+class ShoppingItem(Base):
+    """One line of the shopping list (SR-94)."""
+    __tablename__ = "shopping_list"
+
+    id = Column(Integer, primary_key=True, index=True)
+    # What the app shows, e.g. "Cottage cheese" or anything the user typed
+    name = Column(String, nullable=False)
+    # The catalog name (vision/products.py) when the item is a known product, e.g. "cottage_cheese".
+    # Lets an auto-added product be matched to the inventory and not be added twice
+    product_name = Column(String, nullable=True, index=True)
+    # A ShoppingItemSource value
+    source = Column(String, nullable=False, default=ShoppingItemSource.MANUAL.value,
+                    server_default=ShoppingItemSource.MANUAL.value)
+    # Checked off as bought; kept in a "Bought" section until the user clears it
+    checked = Column(Boolean, nullable=False, default=False, server_default="false")
+    created_at = Column(DateTime, default=datetime.utcnow)

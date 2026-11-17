@@ -97,3 +97,28 @@ class InventoryItemUpdate(BaseModel):
     expiration_date: Optional[date] = None
     category: Optional[Category] = None
     quantity: Optional[int] = Field(default=None, ge=1)
+
+
+class ShoppingItemCreate(BaseModel):
+    """POST /api/v1/shopping-list: an item the user typed."""
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=60)
+
+
+class ShoppingItemUpdate(BaseModel):
+    """PATCH /api/v1/shopping-list/{id}: check an item off as bought, or back."""
+    model_config = ConfigDict(extra="forbid")
+
+    checked: bool
+
+
+class ShoppingItemResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    name: str
+    product_name: Optional[str] = None
+    source: Literal["manual", "auto"]
+    checked: bool
+    created_at: datetime

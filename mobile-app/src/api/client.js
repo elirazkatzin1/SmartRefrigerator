@@ -79,6 +79,33 @@ export function updateInventoryItem(id, changes) {
   return request(`/inventory/${id}`, { method: 'PATCH', body: changes });
 }
 
+// Shopping list (SR-94)
+
+// GET /shopping-list: items to buy first, then the bought ones
+export function getShoppingList() {
+  return request('/shopping-list');
+}
+
+// POST /shopping-list: add an item the user typed. Fails with status 409 if it is already on the list
+export function addShoppingItem(name) {
+  return request('/shopping-list', { method: 'POST', body: { name } });
+}
+
+// PATCH /shopping-list/{id}: check an item off as bought (or back)
+export function setShoppingItemChecked(id, checked) {
+  return request(`/shopping-list/${id}`, { method: 'PATCH', body: { checked } });
+}
+
+// DELETE /shopping-list/{id}
+export function deleteShoppingItem(id) {
+  return request(`/shopping-list/${id}`, { method: 'DELETE' });
+}
+
+// DELETE /shopping-list/checked: remove every bought item
+export function clearBoughtItems() {
+  return request('/shopping-list/checked', { method: 'DELETE' });
+}
+
 // GET /inventory/expired: items whose expiration date has passed
 export function getExpiredInventory() {
   return request('/inventory/expired');

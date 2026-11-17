@@ -28,13 +28,17 @@ from analysis import analyze_upload, fail_interrupted_analyses
 from database import get_db
 from inventory.edit import InvalidEdit, apply_edit
 from log import configure_logging, log
-from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory
+import shopping
+from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory, ShoppingItem
 from schemas import (
     DoorStatusCreate,
     DoorStatusResponse,
     EventAnalysisResponse,
     InventoryItemResponse,
     InventoryItemUpdate,
+    ShoppingItemCreate,
+    ShoppingItemResponse,
+    ShoppingItemUpdate,
 )
 from vision import detector
 from vision.calibration import undistort
@@ -257,6 +261,43 @@ async def alerts_socket(websocket: WebSocket):
         pass
     finally:
         alert_hub.disconnect(websocket)
+
+#רשימת הקניות: קודם מה שעוד צריך לקנות, אחר כך מה שכבר נקנה
+@app.get("/api/v1/shopping-list", response_model=list[ShoppingItemResponse])
+async def get_shopping_list(db: AsyncSession = Depends(get_db)):
+    return await shopping.list_items(db)
+
+#הוספת פריט שהמשתמש הקליד
+@app.post("/api/v1/shopping-list", response_model=ShoppingItemResponse, status_code=201)
+async def add_shopping_item(item: ShoppingItemCreate, db: AsyncSession = Depends(get_db)):
+    try:
+        return await shopping.add_manual(db, item.name)
+    except shopping.DuplicateItem as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+
+#מחיקת כל מה שסומן כנקנה. מוגדר לפני /{item_id}, אחרת "checked" היה נקרא כמזהה
+@app.delete("/api/v1/shopping-list/checked", status_code=204)
+async def clear_bought_items(db: AsyncSession = Depends(get_db)):
+    await shopping.clear_checked(db)
+
+#סימון פריט כנקנה (או ביטול הסימון)
+@app.patch("/api/v1/shopping-list/{item_id}", response_model=ShoppingItemResponse)
+async def update_shopping_item(item_id: int, update: ShoppingItemUpdate, db: AsyncSession = Depends(get_db)):
+    item = await db.get(ShoppingItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return await shopping.set_checked(db, item, update.checked)
+
+#מחיקת פריט מהרשימה
+@app.delete("/api/v1/shopping-list/{item_id}", status_code=204)
+async def delete_shopping_item(item_id: int, db: AsyncSession = Depends(get_db)):
+    item = await db.get(ShoppingItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    await db.delete(item)
+    await db.commit()
 
 #דף בדיקה למפתחים: מציג את ההתראות בזמן אמת ומאפשר להפעיל אירועים (דלת, זמן במקרר)
 @app.get("/dev/alerts", include_in_schema=False)
