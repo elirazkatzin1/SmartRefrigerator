@@ -12,10 +12,12 @@ const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
 // Live list of active fridge alerts, kept in sync over a WebSocket.
 //   alerts  the list the server sent last (kept while reconnecting)
 //   status  'connecting' | 'connected' | 'disconnected' (and retrying)
+//   loaded  false until the first list arrived (so an empty list can mean "none yet" or "no alerts")
 // The server sends the whole list on connect and on every change: { type: 'alerts', alerts: [...] }
 export function useAlerts() {
   const [alerts, setAlerts] = useState([]);
   const [status, setStatus] = useState('connecting');
+  const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let socket = null;
@@ -34,7 +36,10 @@ export function useAlerts() {
       socket.onmessage = (event) => {
         try {
           const message = JSON.parse(event.data);
-          if (message.type === 'alerts') setAlerts(message.alerts);
+          if (message.type === 'alerts') {
+            setAlerts(message.alerts);
+            setLoaded(true);
+          }
         } catch {
           // Not JSON: ignore, the next message will bring the full list anyway
         }
@@ -70,5 +75,5 @@ export function useAlerts() {
     };
   }, []);
 
-  return { alerts, status };
+  return { alerts, status, loaded };
 }

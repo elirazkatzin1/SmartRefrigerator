@@ -8,6 +8,7 @@ import FilterDropdown from '../../src/components/FilterDropdown';
 import InventoryItemRow from '../../src/components/InventoryItemRow';
 import { EmptyState, ErrorState, LoadingState } from '../../src/components/StateViews';
 import { useApi } from '../../src/hooks/useApi';
+import { syncExpiryReminders } from '../../src/notifications';
 import { colors, formatProductName, getExpiryStatus, SOON_MAX_DAYS, spacing } from '../../src/theme';
 
 // While the Fridge tab is open, reload in the background this often. The backend has no
@@ -75,6 +76,11 @@ export default function FridgeScreen() {
   const [expiry, setExpiry] = useState(ALL);
   const [editing, setEditing] = useState(null);
   const [savedName, setSavedName] = useState(null);
+
+  // Keep the expiry reminders in step with what is on screen, e.g. right after an edit (SR-93)
+  useEffect(() => {
+    if (data) syncExpiryReminders(data);
+  }, [data]);
 
   // Hide the "Changes saved" confirmation after a moment
   useEffect(() => {

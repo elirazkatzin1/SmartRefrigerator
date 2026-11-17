@@ -6,6 +6,7 @@
     "plugins": [
       "expo-router",
       "expo-font",
+      "expo-notifications",
       [
         "expo-splash-screen",
         {

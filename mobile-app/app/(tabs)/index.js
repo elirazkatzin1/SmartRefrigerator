@@ -2,6 +2,7 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import AlertCard from '../../src/components/AlertCard';
 import { EmptyState } from '../../src/components/StateViews';
+import { useAlertNotifications } from '../../src/hooks/useAlertNotifications';
 import { useAlerts } from '../../src/hooks/useAlerts';
 import { colors, spacing } from '../../src/theme';
 
@@ -22,7 +23,8 @@ const CONNECTION = {
 
 // Home screen: greeting, today's date and the live fridge alerts (SR-92)
 export default function HomeScreen() {
-  const { alerts, status } = useAlerts();
+  const { alerts, status, loaded } = useAlerts();
+  useAlertNotifications(alerts, loaded);
   const connection = CONNECTION[status];
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
