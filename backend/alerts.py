@@ -162,6 +162,15 @@ class AlertHub:
                 # The app went away without closing the connection
                 self._clients.discard(websocket)
 
+    @property
+    def expected_cameras(self) -> int:
+        return self._expected_cameras
+
+    def offline_cameras(self) -> list[int]:
+        """The cameras whose photo was missing from the last door event (the active camera_offline alerts)."""
+        prefix = "camera_offline:"
+        return sorted(int(key[len(prefix):]) for key in self._alerts if key.startswith(prefix))
+
     async def door_changed(self, door_open: bool) -> None:
         """Called on every door status. Starts the door-open timer, or clears it and the alert."""
         if self._door_timer is not None:

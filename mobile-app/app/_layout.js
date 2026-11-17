@@ -5,7 +5,8 @@ import { useEffect } from 'react';
 import { AppState } from 'react-native';
 
 import { getInventory } from '../src/api/client';
-import { ensureNotificationPermission, syncExpiryReminders } from '../src/notifications';
+import { ensureNotificationPermission, setNotificationPreferences, syncExpiryReminders } from '../src/notifications';
+import { SettingsProvider, useSettings } from '../src/settings';
 import { colors } from '../src/theme';
 
 // Tapping a notification opens the screen in its data.url ("/fridge" for expiry, "/" for door/camera),
@@ -28,9 +29,16 @@ function useOpenNotificationTaps() {
 }
 
 // Ask for notification permission on the first launch, and keep the expiry reminders in step with
-// the inventory: on start and whenever the app comes back to the foreground (SR-93)
+// the inventory and the user's notification settings: on start, whenever the app comes back to the
+// foreground, and when a setting changes (SR-93, SR-95)
 function useExpiryReminders() {
+  const { settings, loaded } = useSettings();
+  const { notify } = settings;
+
   useEffect(() => {
+    // Wait for the stored settings, so reminders the user turned off are never scheduled
+    if (!loaded) return undefined;
+    setNotificationPreferences(notify);
     const sync = () =>
       getInventory()
         .then(syncExpiryReminders)
@@ -40,11 +48,10 @@ function useExpiryReminders() {
     ensureNotificationPermission().then(sync);
     const subscription = AppState.addEventListener('change', (state) => state === 'active' && sync());
     return () => subscription.remove();
-  }, []);
+  }, [loaded, notify]);
 }
 
-// Root stack: the tabs, plus screens pushed above them (Profile, reached from Settings).
-export default function RootLayout() {
+function AppShell() {
   useOpenNotificationTaps();
   useExpiryReminders();
 
@@ -52,9 +59,20 @@ export default function RootLayout() {
     <>
       <Stack screenOptions={{ contentStyle: { backgroundColor: colors.background } }}>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="profile" options={{ title: 'Profile' }} />
+        {/* Without headerBackTitle the back button would show the tab group's name, "(tabs)" */}
+        <Stack.Screen name="profile" options={{ title: 'Profile', headerBackTitle: 'Settings' }} />
       </Stack>
       <StatusBar style="dark" />
     </>
+  );
+}
+
+// Root: the settings are available to every screen; the stack holds the tabs, plus screens pushed
+// above them (Profile, reached from Settings)
+export default function RootLayout() {
+  return (
+    <SettingsProvider>
+      <AppShell />
+    </SettingsProvider>
   );
 }

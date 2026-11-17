@@ -130,6 +130,15 @@ class AlertHubTest(unittest.IsolatedAsyncioTestCase):
         await self.hub.event_merged({1, 2, 3})
         self.assertEqual(self.app.last_types(), [])
 
+    async def test_offline_cameras_lists_the_missing_ones(self):
+        self.assertEqual(self.hub.offline_cameras(), [])
+
+        await self.hub.event_merged({2})
+        self.assertEqual(self.hub.offline_cameras(), [1, 3])
+
+        await self.hub.event_merged({1, 2, 3})
+        self.assertEqual(self.hub.offline_cameras(), [])
+
     async def test_camera_alert_keeps_its_time_while_still_missing(self):
         await self.hub.event_merged({1, 3})
         first = self.app.messages[-1]["alerts"][0]["created_at"]

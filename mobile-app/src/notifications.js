@@ -23,6 +23,24 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Which notifications the user wants (Settings, SR-95); set by the root layout from the stored settings
+let preferences = { expiry: true, door: true, camera: true };
+
+export function setNotificationPreferences(notify) {
+  preferences = notify;
+}
+
+// 'granted' | 'denied' | 'undetermined', for the Settings screen
+export async function getNotificationPermissionStatus() {
+  try {
+    const { granted, canAskAgain } = await Notifications.getPermissionsAsync();
+    if (granted) return 'granted';
+    return canAskAgain ? 'undetermined' : 'denied';
+  } catch {
+    return 'undetermined';
+  }
+}
+
 let permissionPromise = null;
 
 // Asks for permission once (the system only shows its prompt the first time). Resolves to true when
@@ -55,7 +73,8 @@ let lastPlanKey = null;
 // fresh inventory, so edits, new products and removed ones are reflected.
 export async function syncExpiryReminders(items) {
   if (!(await ensureNotificationPermission())) return;
-  const plan = planExpiryReminders(items);
+  // Turned off in Settings: an empty plan cancels every scheduled reminder
+  const plan = preferences.expiry ? planExpiryReminders(items) : [];
   const planKey = JSON.stringify(plan.map((reminder) => [reminder.identifier, reminder.date.getTime(), reminder.body]));
   if (planKey === lastPlanKey) return;
   try {
@@ -84,6 +103,7 @@ export async function syncExpiryReminders(items) {
 
 // Show a door or camera alert right away
 export async function notifyAlert(alert) {
+  if (!preferences[alert.type === 'door_open' ? 'door' : 'camera']) return;
   if (!(await ensureNotificationPermission())) return;
   try {
     await Notifications.scheduleNotificationAsync({

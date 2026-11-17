@@ -4,9 +4,10 @@ import AlertCard from '../../src/components/AlertCard';
 import { EmptyState } from '../../src/components/StateViews';
 import { useAlertNotifications } from '../../src/hooks/useAlertNotifications';
 import { useAlerts } from '../../src/hooks/useAlerts';
+import { useSettings } from '../../src/settings';
 import { colors, spacing } from '../../src/theme';
 
-// Greeting by the time of day. The user's name comes with the Profile screen (SR-95)
+// Greeting by the time of day
 function greeting() {
   const hour = new Date().getHours();
   if (hour >= 5 && hour < 12) return 'Good morning';
@@ -25,12 +26,17 @@ const CONNECTION = {
 export default function HomeScreen() {
   const { alerts, status, loaded } = useAlerts();
   useAlertNotifications(alerts, loaded);
+  // The name from the Profile screen (SR-95), if the user entered one
+  const { name } = useSettings().settings;
   const connection = CONNECTION[status];
   const today = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
   return (
     <ScrollView contentContainerStyle={styles.container}>
-      <Text style={styles.greeting}>{greeting()}!</Text>
+      <Text style={styles.greeting}>
+        {greeting()}
+        {name ? `, ${name}` : ''}!
+      </Text>
       <Text style={styles.date}>{today}</Text>
 
       <View style={styles.sectionHeader}>

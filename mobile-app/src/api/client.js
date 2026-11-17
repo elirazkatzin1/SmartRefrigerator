@@ -79,6 +79,11 @@ export function updateInventoryItem(id, changes) {
   return request(`/inventory/${id}`, { method: 'PATCH', body: changes });
 }
 
+// GET /fridge/state: last door event, last photo and missing cameras (Settings, SR-95)
+export function getFridgeState() {
+  return request('/fridge/state');
+}
+
 // Shopping list (SR-94)
 
 // GET /shopping-list: items to buy first, then the bought ones

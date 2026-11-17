@@ -34,6 +34,7 @@ from schemas import (
     DoorStatusCreate,
     DoorStatusResponse,
     EventAnalysisResponse,
+    FridgeStateResponse,
     InventoryItemResponse,
     InventoryItemUpdate,
     ShoppingItemCreate,
@@ -261,6 +262,19 @@ async def alerts_socket(websocket: WebSocket):
         pass
     finally:
         alert_hub.disconnect(websocket)
+
+#מצב המקרר למסך ההגדרות: אירוע הדלת האחרון, התמונה האחרונה ומצלמות שלא שלחו תמונה
+@app.get("/api/v1/fridge/state", response_model=FridgeStateResponse)
+async def get_fridge_state(db: AsyncSession = Depends(get_db)):
+    last_door = (await db.execute(select(DoorEvent).order_by(DoorEvent.created_at.desc()).limit(1))).scalar_one_or_none()
+    state = await db.get(FridgeState, FRIDGE_STATE_ID)
+    return FridgeStateResponse(
+        door_open=last_door.door_open if last_door else None,
+        last_door_event_at=last_door.created_at if last_door else None,
+        last_image_at=state.last_image_taken if state else None,
+        expected_cameras=alert_hub.expected_cameras,
+        offline_cameras=alert_hub.offline_cameras(),
+    )
 
 #רשימת הקניות: קודם מה שעוד צריך לקנות, אחר כך מה שכבר נקנה
 @app.get("/api/v1/shopping-list", response_model=list[ShoppingItemResponse])

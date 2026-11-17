@@ -122,3 +122,16 @@ class ShoppingItemResponse(BaseModel):
     source: Literal["manual", "auto"]
     checked: bool
     created_at: datetime
+
+
+class FridgeStateResponse(BaseModel):
+    """GET /api/v1/fridge/state: what the server last heard from the fridge, for the Settings screen (SR-95).
+    The cameras send no heartbeat, so their latest activity is the best sign that they work."""
+    # The latest door status the fridge sent, and when (UTC). None before the first one
+    door_open: Optional[bool] = None
+    last_door_event_at: Optional[datetime] = None
+    # When the latest camera photo arrived (UTC)
+    last_image_at: Optional[datetime] = None
+    expected_cameras: int
+    # Cameras whose photo was missing from the last door event
+    offline_cameras: list[int]
