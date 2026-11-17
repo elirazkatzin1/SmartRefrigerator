@@ -1,5 +1,5 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import {
   colors,
@@ -11,8 +11,8 @@ import {
 } from '../theme';
 
 // One item in the Fridge list: color strip by time in the fridge, name, quantity, category
-// and how long it has been in the fridge (SR-89)
-export default function InventoryItemRow({ item }) {
+// and how long it has been in the fridge (SR-89), with a pencil that opens the editor (SR-91)
+export default function InventoryItemRow({ item, onEdit }) {
   const color = fridgeTimeColors[getFridgeTimeStatus(item.added_at)];
 
   return (
@@ -31,6 +31,16 @@ export default function InventoryItemRow({ item }) {
           <Text style={styles.time}>{describeTimeInFridge(item.added_at)}</Text>
         </View>
       </View>
+      {onEdit && (
+        <Pressable
+          style={styles.edit}
+          onPress={() => onEdit(item)}
+          hitSlop={8}
+          accessibilityLabel={`Edit ${formatProductName(item.product_name)}`}
+        >
+          <Ionicons name="pencil" size={18} color={colors.primary} />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -52,4 +62,14 @@ const styles = StyleSheet.create({
   category: { fontSize: 13, color: colors.textMuted },
   timeLine: { flexDirection: 'row', alignItems: 'center', gap: spacing.xs, marginTop: spacing.xs },
   time: { fontSize: 13, fontWeight: '600', color: colors.text },
+  edit: {
+    alignSelf: 'center',
+    width: 36,
+    height: 36,
+    marginRight: spacing.sm,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EAF2FD',
+  },
 });

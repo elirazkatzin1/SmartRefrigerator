@@ -23,16 +23,33 @@ export const spacing = { xs: 4, sm: 8, md: 16, lg: 24 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
-// Calendar days since the item went into the fridge (0 = today).
 // added_at comes from the backend in UTC without a "Z" (e.g. "2026-11-11T09:30:00.123"), so
-// the Z is added to parse it as UTC; the day boundary is then the phone's local midnight.
+// the Z is added to parse it as UTC. Returns that moment as a Date.
+export function parseAddedAt(addedAt) {
+  return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(addedAt) ? addedAt : `${addedAt}Z`);
+}
+
+// Calendar days since the item went into the fridge (0 = today), counted at the phone's local midnight.
 export function daysInFridge(addedAt) {
-  const utc = /[zZ]|[+-]\d\d:\d\d$/.test(addedAt) ? addedAt : `${addedAt}Z`;
-  const added = new Date(utc);
+  const added = parseAddedAt(addedAt);
   added.setHours(0, 0, 0, 0);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return Math.max(0, Math.round((today - added) / MS_PER_DAY));
+}
+
+// Date -> "DD/MM/YYYY" (local day)
+export function formatDay(day) {
+  const dd = String(day.getDate()).padStart(2, '0');
+  const mm = String(day.getMonth() + 1).padStart(2, '0');
+  return `${dd}/${mm}/${day.getFullYear()}`;
+}
+
+// Date -> "YYYY-MM-DD" (local day), the format the backend expects
+export function toIsoDay(day) {
+  const dd = String(day.getDate()).padStart(2, '0');
+  const mm = String(day.getMonth() + 1).padStart(2, '0');
+  return `${day.getFullYear()}-${mm}-${dd}`;
 }
 
 // Returns 'fresh' | 'long' | 'unknown' for an item's added_at.

@@ -12,9 +12,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from analysis import analyze_upload, fail_interrupted_analyses
 from database import get_db
+from inventory.edit import InvalidEdit, apply_edit
 from log import configure_logging, log
 from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory
-from schemas import DoorStatusCreate, DoorStatusResponse, EventAnalysisResponse, InventoryItemResponse
+from schemas import (
+    DoorStatusCreate,
+    DoorStatusResponse,
+    EventAnalysisResponse,
+    InventoryItemResponse,
+    InventoryItemUpdate,
+)
 from vision import detector
 from vision.calibration import undistort
 from vision.draw import draw_detections
@@ -201,3 +208,19 @@ async def get_expired_inventory(db: AsyncSession = Depends(get_db)):
         .order_by(Inventory.expiration_date)
     )
     return result.scalars().all()
+
+#עריכה ידנית של מוצר מהאפליקציה: תאריך הכנסה, קטגוריה, כמות
+@app.patch("/api/v1/inventory/{item_id}", response_model=InventoryItemResponse)
+async def edit_inventory_item(item_id: int, update: InventoryItemUpdate, db: AsyncSession = Depends(get_db)):
+    row = await db.get(Inventory, item_id)
+    # A removed product is history, not inventory, so it can't be edited either
+    if row is None or row.removed_at is not None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    try:
+        apply_edit(row, update, datetime.now(LOCAL_TZ).date())
+    except InvalidEdit as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    await db.commit()
+    await db.refresh(row)
+    log(logger, "inventory item edited", item_id=item_id, **update.model_dump(exclude_none=True, mode="json"))
+    return row

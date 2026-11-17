@@ -3,6 +3,8 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from vision.products import Category
+
 
 class DoorStatusCreate(BaseModel):
     # Matches the JSON body sent by the ESP32-CAM firmware (sendDoorStatus)
@@ -83,3 +85,13 @@ class InventoryItemResponse(BaseModel):
     source: Literal["ai", "manual"]
     expiration_source: Optional[Literal["ocr", "estimated", "manual"]] = None
     removed_at: Optional[datetime] = None
+
+
+class InventoryItemUpdate(BaseModel):
+    """PATCH /api/v1/inventory/{id}: the fields the user can fix in the app. Omitted fields stay as they are."""
+    model_config = ConfigDict(extra="forbid")
+
+    # The local (Israel) day the product was put in the fridge; the app shows "N days in fridge" from it
+    added_on: Optional[date] = None
+    category: Optional[Category] = None
+    quantity: Optional[int] = Field(default=None, ge=1)

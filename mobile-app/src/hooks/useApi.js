@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 //   error       error of the last request, null if it succeeded
 //   reload()    reload with the pull-to-refresh spinner
 //   reload({ silent: true })  reload in the background without any spinner
+//   setData     replace the data locally, e.g. to show a saved edit before the next reload
 // Pass a stable function (e.g. getInventory) so it does not refetch on every render.
 export function useApi(apiFn) {
   const [data, setData] = useState(null);
@@ -47,5 +48,5 @@ export function useApi(apiFn) {
     };
   }, [reload]);
 
-  return { data, loading, refreshing, error, reload };
+  return { data, loading, refreshing, error, reload, setData };
 }

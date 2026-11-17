@@ -73,6 +73,12 @@ export function getInventory() {
   return request('/inventory');
 }
 
+// PATCH /inventory/{id}: fix an item. changes may hold added_on ("YYYY-MM-DD"), category and
+// quantity; fields left out stay as they are. Returns the updated item.
+export function updateInventoryItem(id, changes) {
+  return request(`/inventory/${id}`, { method: 'PATCH', body: changes });
+}
+
 // GET /inventory/expired: items whose expiration date has passed
 export function getExpiredInventory() {
   return request('/inventory/expired');
