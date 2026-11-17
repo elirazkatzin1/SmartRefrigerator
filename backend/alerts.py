@@ -9,8 +9,11 @@ Alert types:
 - camera_offline (critical): a camera's photo was missing from the last door-close event (it was
   merged after the timeout without it). Cleared once that camera's photo arrives for an event again.
   The cameras send no heartbeat, so a missing photo is the only sign that a camera is down.
-- long_in_fridge (info): a product has been in the fridge more than LONG_IN_FRIDGE_DAYS days.
-  Computed from the inventory each time the list is sent, so it follows edits and new days.
+- expiring_soon (info): a product expires within EXPIRY_ALERT_DAYS days (0 = today).
+- expired (warning): a product's expiration date has passed.
+  Both come from Inventory.expiration_date, estimated from the product's shelf life or entered by the
+  user (SR-123). They are computed from the inventory each time the list is sent, so they follow
+  edits and new days. An estimated date says "probably", since it is a guess.
 
 Door and camera alerts are kept in memory: after a server restart they are empty until the next event.
 """
@@ -33,11 +36,12 @@ from models import Inventory
 logger = logging.getLogger(__name__)
 
 DOOR_OPEN_ALERT_S = float(os.getenv("DOOR_OPEN_ALERT_S", "120"))
-# Same as FRESH_MAX_DAYS in mobile-app/src/theme.js: past it the item turns yellow in the app
-LONG_IN_FRIDGE_DAYS = 5
-# long_in_fridge alerts change when the day rolls over, without any event, so the list is resent this often
+# Alert about a product from this many days before its expiration date: 2 = when it expires
+# today, tomorrow or the day after
+EXPIRY_ALERT_DAYS = 2
+# Expiry alerts change when the day rolls over, without any event, so the list is resent this often
 REFRESH_INTERVAL_S = 600
-# The days in the fridge are counted on an Israel calendar, like in the app
+# Days are counted on an Israel calendar, like in the app
 LOCAL_TZ = ZoneInfo("Asia/Jerusalem")
 
 SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
@@ -47,18 +51,16 @@ SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 class Alert:
     # Stable per alert, e.g. "camera_offline:3", so the app can keep its place in the list
     id: str
-    type: str  # door_open | camera_offline | long_in_fridge
+    type: str  # door_open | camera_offline | expiring_soon | expired
     severity: str  # info | warning | critical
     message: str
     created_at: str  # ISO 8601 in UTC
+    # For expiry alerts: the product's expiration date (YYYY-MM-DD), used to put the soonest first
+    expires_on: str | None = None
 
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _local_day(utc_naive: datetime) -> date:
-    return utc_naive.replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ).date()
 
 
 def _display_name(product_name: str) -> str:
@@ -66,21 +68,35 @@ def _display_name(product_name: str) -> str:
     return product_name.replace("_", " ").strip().capitalize()
 
 
+def _expiry_message(name: str, days_left: int, estimated: bool) -> str:
+    if days_left < 0:
+        if estimated:
+            return f"{name} has probably expired"
+        return f"{name} expired {'yesterday' if days_left == -1 else f'{-days_left} days ago'}"
+    when = "today" if days_left == 0 else "tomorrow" if days_left == 1 else f"in {days_left} days"
+    return f"{name} {'probably ' if estimated else ''}expires {when}"
+
+
 def item_alerts(rows: Iterable[Inventory], today: date) -> list[Alert]:
-    """A long_in_fridge alert for every product in the fridge more than LONG_IN_FRIDGE_DAYS days."""
+    """An expiring_soon or expired alert for every product within EXPIRY_ALERT_DAYS of its expiration date."""
     alerts = []
     for row in rows:
-        if row.added_at is None:
+        if row.expiration_date is None:
             continue
-        days = (today - _local_day(row.added_at)).days
-        if days > LONG_IN_FRIDGE_DAYS:
-            alerts.append(Alert(
-                id=f"long_in_fridge:{row.id}",
-                type="long_in_fridge",
-                severity="info",
-                message=f"{_display_name(row.product_name)} has been in the fridge for {days} days",
-                created_at=row.added_at.replace(tzinfo=timezone.utc).isoformat(),
-            ))
+        days_left = (row.expiration_date - today).days
+        if days_left > EXPIRY_ALERT_DAYS:
+            continue
+        expired = days_left < 0
+        alerts.append(Alert(
+            # One id per product for both types, so the app sees one alert that changes, not two
+            id=f"expiry:{row.id}",
+            type="expired" if expired else "expiring_soon",
+            severity="warning" if expired else "info",
+            message=_expiry_message(_display_name(row.product_name), days_left,
+                                    estimated=row.expiration_source == "estimated"),
+            created_at=_now_iso(),
+            expires_on=row.expiration_date.isoformat(),
+        ))
     return alerts
 
 
@@ -90,9 +106,12 @@ def missing_cameras(reported: Iterable[int], expected: int) -> set[int]:
 
 
 def sort_alerts(alerts: list[Alert]) -> list[Alert]:
-    """Most severe first; within a severity, the newest first."""
+    """Most severe first. Within a severity: door and camera alerts (newest first), then expiry alerts
+    (the soonest expiration first)."""
     newest_first = sorted(alerts, key=lambda alert: alert.created_at, reverse=True)
-    return sorted(newest_first, key=lambda alert: SEVERITY_ORDER[alert.severity])
+    # Python's sort is stable, so each sort keeps the order of the previous one for equal keys
+    by_expiry = sorted(newest_first, key=lambda alert: alert.expires_on or "")
+    return sorted(by_expiry, key=lambda alert: SEVERITY_ORDER[alert.severity])
 
 
 async def _load_inventory() -> list[Inventory]:
@@ -109,7 +128,7 @@ class AlertHub:
         self._door_open_alert_s = door_open_alert_s
         self._expected_cameras = expected_cameras
         self._clients: set[WebSocket] = set()
-        # door_open and camera_offline alerts; long_in_fridge ones are computed when sending
+        # door_open and camera_offline alerts; expiry ones are computed when sending
         self._alerts: dict[str, Alert] = {}
         self._door_timer: asyncio.Task | None = None
 
@@ -184,11 +203,11 @@ class AlertHub:
                 )
         if missing:
             log(logger, "cameras missing from event", logging.WARNING, cameras=sorted(missing))
-        # The inventory changed too, so the long_in_fridge alerts may have
+        # The inventory changed too, so the expiry alerts may have
         await self.broadcast()
 
     async def refresh_forever(self) -> None:
-        """Resend the list periodically, so long_in_fridge alerts follow the date. Run as a task."""
+        """Resend the list periodically, so expiry alerts follow the date. Run as a task."""
         while True:
             await asyncio.sleep(REFRESH_INTERVAL_S)
             await self.broadcast()

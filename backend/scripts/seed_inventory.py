@@ -40,6 +40,8 @@ SAMPLE_ITEMS = [
     ("tortillas", 1, 1, 0),
 ]
 SAMPLE_NAMES = [name for name, *_ in SAMPLE_ITEMS]
+# These have a date "copied from the package"; the rest have an estimated one, as the cameras' products will (SR-123)
+MANUAL_DATES = {"milk", "yogurt"}
 
 
 async def clear_samples(db):
@@ -67,7 +69,9 @@ async def seed():
                 quantity=quantity,
                 added_at=now_utc - timedelta(days=days_in_fridge),
                 expiration_date=expiration,
-                expiration_source=ExpirationSource.MANUAL.value if expiration else None,
+                expiration_source=(None if expiration is None
+                                   else ExpirationSource.MANUAL.value if name in MANUAL_DATES
+                                   else ExpirationSource.ESTIMATED.value),
                 source=InventorySource.MANUAL.value,
             ))
         await db.commit()

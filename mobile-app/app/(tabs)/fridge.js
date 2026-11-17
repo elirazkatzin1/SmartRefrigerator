@@ -8,7 +8,7 @@ import FilterDropdown from '../../src/components/FilterDropdown';
 import InventoryItemRow from '../../src/components/InventoryItemRow';
 import { EmptyState, ErrorState, LoadingState } from '../../src/components/StateViews';
 import { useApi } from '../../src/hooks/useApi';
-import { colors, formatProductName, FRESH_MAX_DAYS, getFridgeTimeStatus, spacing } from '../../src/theme';
+import { colors, formatProductName, getExpiryStatus, SOON_MAX_DAYS, spacing } from '../../src/theme';
 
 // While the Fridge tab is open, reload in the background this often. The backend has no
 // push channel yet, so this is how a door-close event shows up in the list. Once the
@@ -18,11 +18,13 @@ const AUTO_REFRESH_MS = 15000;
 const ALL = 'all';
 const NO_CATEGORY = 'none';
 
-// Values match getFridgeTimeStatus(), so the filter follows the same rule as the colors
-const TIME_OPTIONS = [
+// Values match getExpiryStatus(), so the filter follows the same rule as the colors
+const EXPIRY_OPTIONS = [
   { value: ALL, label: 'All' },
-  { value: 'fresh', label: `Up to ${FRESH_MAX_DAYS} days` },
-  { value: 'long', label: `More than ${FRESH_MAX_DAYS} days` },
+  { value: 'fresh', label: 'Fresh' },
+  { value: 'soon', label: `Expiring soon (0-${SOON_MAX_DAYS} days)` },
+  { value: 'expired', label: 'Expired' },
+  { value: 'unknown', label: 'No expiry date' },
 ];
 
 // Category options from the items in the fridge, so only categories that exist are offered.
@@ -37,9 +39,9 @@ function categoryOptions(items, selected) {
   ];
 }
 
-function matchesFilters(item, category, time) {
+function matchesFilters(item, category, expiry) {
   if (category !== ALL && (item.category ?? NO_CATEGORY) !== category) return false;
-  if (time !== ALL && getFridgeTimeStatus(item.added_at) !== time) return false;
+  if (expiry !== ALL && getExpiryStatus(item.expiration_date) !== expiry) return false;
   return true;
 }
 
@@ -65,12 +67,12 @@ function InventoryTotal({ items }) {
 // How long the "Changes saved" confirmation stays on screen
 const SAVED_MESSAGE_MS = 2500;
 
-// Fridge tab: inventory list with category and time-in-fridge filters (SR-89, SR-90)
+// Fridge tab: inventory list with category and expiry filters (SR-89, SR-90, SR-123)
 // and editing an item (SR-91)
 export default function FridgeScreen() {
   const { data, loading, refreshing, error, reload, setData } = useApi(getInventory);
   const [category, setCategory] = useState(ALL);
-  const [time, setTime] = useState(ALL);
+  const [expiry, setExpiry] = useState(ALL);
   const [editing, setEditing] = useState(null);
   const [savedName, setSavedName] = useState(null);
 
@@ -99,11 +101,11 @@ export default function FridgeScreen() {
   );
 
   const items = data ?? [];
-  const filtered = useMemo(() => items.filter((item) => matchesFilters(item, category, time)), [items, category, time]);
-  const filtering = category !== ALL || time !== ALL;
+  const filtered = useMemo(() => items.filter((item) => matchesFilters(item, category, expiry)), [items, category, expiry]);
+  const filtering = category !== ALL || expiry !== ALL;
   const clearFilters = () => {
     setCategory(ALL);
-    setTime(ALL);
+    setExpiry(ALL);
   };
 
   if (loading) return <LoadingState message="Loading inventory..." />;
@@ -131,7 +133,7 @@ export default function FridgeScreen() {
                     value={category}
                     onChange={setCategory}
                   />
-                  <FilterDropdown title="In fridge" options={TIME_OPTIONS} value={time} onChange={setTime} />
+                  <FilterDropdown title="Expiry" options={EXPIRY_OPTIONS} value={expiry} onChange={setExpiry} />
                 </View>
                 {filtering && (
                   <View style={styles.filterStatus}>

@@ -93,5 +93,7 @@ class InventoryItemUpdate(BaseModel):
 
     # The local (Israel) day the product was put in the fridge; the app shows "N days in fridge" from it
     added_on: Optional[date] = None
+    # The date printed on the package. Stored as a manual expiration, which no estimate overwrites
+    expiration_date: Optional[date] = None
     category: Optional[Category] = None
     quantity: Optional[int] = Field(default=None, ge=1)

@@ -1,4 +1,4 @@
-"""Manual fixes the user makes to an inventory item in the app (SR-91).
+"""Manual fixes the user makes to an inventory item in the app (SR-91, expiration date: SR-123).
 
 Only the fields in InventoryItemUpdate change. Note that the cameras still own the quantity of the
 rows they added: the next door event sets it back to what they see (inventory/update.py).
@@ -6,7 +6,7 @@ rows they added: the next door event sets it back to what they see (inventory/up
 from datetime import date, datetime, time, timezone
 from zoneinfo import ZoneInfo
 
-from models import Inventory
+from models import ExpirationSource, Inventory
 from schemas import InventoryItemUpdate
 
 # Same as main.LOCAL_TZ: the user picks days on an Israel calendar
@@ -30,6 +30,10 @@ def apply_edit(row: Inventory, update: InventoryItemUpdate, today: date) -> None
         if update.added_on > today:
             raise InvalidEdit("The date added can't be in the future")
         row.added_at = added_at_for(update.added_on)
+    if update.expiration_date is not None:
+        # Any date is allowed, including a past one: the user may be recording a product that already expired
+        row.expiration_date = update.expiration_date
+        row.expiration_source = ExpirationSource.MANUAL.value
     if update.category is not None:
         row.category = update.category.value
     if update.quantity is not None:

@@ -83,12 +83,12 @@
       </div>
 
       <div class="control">
-        <h3>Time in fridge</h3>
-        <p>Set when a product went in. More than 5 days raises a <b>long_in_fridge</b> alert right away; 5 or less clears it.</p>
+        <h3>Expiry</h3>
+        <p>Set how many days a product has left (as if the user entered the date). 0-2 days raises <b>expiring_soon</b>, below 0 <b>expired</b>; 3 or more clears it.</p>
         <div class="row">
           <select id="item"><option>Loading...</option></select>
-          <input id="days" type="number" min="0" value="10" aria-label="Days ago">
-          <span>days ago</span>
+          <input id="days" type="number" value="1" aria-label="Days left">
+          <span>days left</span>
           <button id="setDate">Set</button>
         </div>
       </div>
@@ -226,7 +226,7 @@ async function door(open) {
 $('doorOpen').onclick = () => door(true).catch(() => {});
 $('doorClose').onclick = () => door(false).catch(() => {});
 
-// ---- time in fridge ----
+// ---- expiry ----
 const displayName = (name) => { const w = name.replace(/_/g, ' '); return w.charAt(0).toUpperCase() + w.slice(1); };
 const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
@@ -245,8 +245,8 @@ async function loadItems() {
 }
 $('setDate').onclick = async () => {
   const day = new Date();
-  day.setDate(day.getDate() - Number($('days').value || 0));
-  await call('PATCH', `/inventory/${$('item').value}`, { added_on: isoDay(day) }).catch(() => {});
+  day.setDate(day.getDate() + Number($('days').value || 0));
+  await call('PATCH', `/inventory/${$('item').value}`, { expiration_date: isoDay(day) }).catch(() => {});
 };
 loadItems().catch(() => {});
 </script>

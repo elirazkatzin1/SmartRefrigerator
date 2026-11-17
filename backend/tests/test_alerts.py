@@ -28,28 +28,51 @@ class FakeApp:
         return [alert["type"] for alert in self.messages[-1]["alerts"]]
 
 
-def row(row_id: int, name: str, added_at: datetime) -> Inventory:
-    return Inventory(id=row_id, product_name=name, quantity=1, added_at=added_at)
+def row(row_id: int, name: str, expires: date | None, source: str = "manual") -> Inventory:
+    return Inventory(id=row_id, product_name=name, quantity=1, added_at=datetime(2026, 11, 10, 10, 0),
+                     expiration_date=expires, expiration_source=source if expires else None)
 
 
 class ItemAlertsTest(unittest.TestCase):
-    def test_only_products_in_the_fridge_more_than_five_days(self):
+    def test_only_products_within_two_days_of_expiry_or_expired(self):
         rows = [
-            row(1, "milk", datetime(2026, 11, 12, 10, 0)),  # 5 days: still fine
-            row(2, "cottage_cheese", datetime(2026, 11, 11, 10, 0)),  # 6 days
+            row(1, "milk", date(2026, 11, 20)),  # 3 days left: no alert yet
+            row(2, "cottage_cheese", date(2026, 11, 19)),  # 2 days left
+            row(3, "yogurt", date(2026, 11, 15)),  # expired
+            row(4, "ketchup", None),  # no date: no alert
         ]
 
-        alerts = item_alerts(rows, TODAY)
+        alerts = {alert.id: alert for alert in item_alerts(rows, TODAY)}
 
-        self.assertEqual([alert.id for alert in alerts], ["long_in_fridge:2"])
-        self.assertEqual(alerts[0].message, "Cottage cheese has been in the fridge for 6 days")
-        self.assertEqual(alerts[0].severity, "info")
+        self.assertEqual(set(alerts), {"expiry:2", "expiry:3"})
+        self.assertEqual((alerts["expiry:2"].type, alerts["expiry:2"].severity), ("expiring_soon", "info"))
+        self.assertEqual((alerts["expiry:3"].type, alerts["expiry:3"].severity), ("expired", "warning"))
+        self.assertEqual(alerts["expiry:2"].expires_on, "2026-11-19")
 
-    def test_days_are_counted_on_the_israel_calendar(self):
-        # 22:30 UTC on Nov 10 is already Nov 11 in Israel, so it is 6 days, not 7
-        alerts = item_alerts([row(1, "milk", datetime(2026, 11, 10, 22, 30))], TODAY)
+    def test_messages_for_a_date_the_user_entered(self):
+        messages = [alert.message for alert in item_alerts([
+            row(1, "milk", date(2026, 11, 17)),
+            row(2, "milk", date(2026, 11, 18)),
+            row(3, "milk", date(2026, 11, 19)),
+            row(4, "milk", date(2026, 11, 16)),
+            row(5, "milk", date(2026, 11, 14)),
+        ], TODAY)]
 
-        self.assertIn("for 6 days", alerts[0].message)
+        self.assertEqual(messages, [
+            "Milk expires today",
+            "Milk expires tomorrow",
+            "Milk expires in 2 days",
+            "Milk expired yesterday",
+            "Milk expired 3 days ago",
+        ])
+
+    def test_estimated_dates_say_probably(self):
+        messages = [alert.message for alert in item_alerts([
+            row(1, "cottage_cheese", date(2026, 11, 18), source="estimated"),
+            row(2, "cottage_cheese", date(2026, 11, 10), source="estimated"),
+        ], TODAY)]
+
+        self.assertEqual(messages, ["Cottage cheese probably expires tomorrow", "Cottage cheese has probably expired"])
 
 
 class HelpersTest(unittest.TestCase):
@@ -57,15 +80,16 @@ class HelpersTest(unittest.TestCase):
         self.assertEqual(missing_cameras({1, 3}, 4), {2, 4})
         self.assertEqual(missing_cameras({1, 2}, 2), set())
 
-    def test_most_severe_first_then_newest(self):
+    def test_most_severe_first_then_events_then_soonest_expiry(self):
         alerts = [
-            Alert("a", "long_in_fridge", "info", "", "2026-11-17T09:00:00+00:00"),
-            Alert("b", "door_open", "warning", "", "2026-11-17T08:00:00+00:00"),
-            Alert("c", "camera_offline", "critical", "", "2026-11-17T07:00:00+00:00"),
-            Alert("d", "long_in_fridge", "info", "", "2026-11-17T10:00:00+00:00"),
+            Alert("later", "expiring_soon", "info", "", "2026-11-17T09:00:00+00:00", "2026-11-19"),
+            Alert("expired", "expired", "warning", "", "2026-11-17T09:00:00+00:00", "2026-11-15"),
+            Alert("door", "door_open", "warning", "", "2026-11-17T08:00:00+00:00"),
+            Alert("camera", "camera_offline", "critical", "", "2026-11-17T07:00:00+00:00"),
+            Alert("sooner", "expiring_soon", "info", "", "2026-11-17T09:00:00+00:00", "2026-11-17"),
         ]
 
-        self.assertEqual([alert.id for alert in sort_alerts(alerts)], ["c", "b", "d", "a"])
+        self.assertEqual([alert.id for alert in sort_alerts(alerts)], ["camera", "door", "expired", "sooner", "later"])
 
 
 class AlertHubTest(unittest.IsolatedAsyncioTestCase):
@@ -114,11 +138,11 @@ class AlertHubTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.app.messages[-1]["alerts"][0]["created_at"], first)
 
     async def test_item_alerts_come_from_the_inventory(self):
-        self.inventory = [row(7, "yogurt", datetime(2026, 1, 1, 10, 0))]
+        self.inventory = [row(7, "yogurt", date(2026, 1, 1))]
 
         await self.hub.broadcast()
 
-        self.assertEqual(self.app.last_types(), ["long_in_fridge"])
+        self.assertEqual(self.app.last_types(), ["expired"])
 
     async def test_inventory_failure_still_sends_the_other_alerts(self):
         async def broken():

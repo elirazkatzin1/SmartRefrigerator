@@ -57,6 +57,21 @@ class ApplyEditTest(unittest.TestCase):
         self.assertEqual(row.quantity, 1)
         self.assertEqual(row.added_at, datetime(2026, 11, 15, 8, 0))
 
+    def test_expiration_date_is_stored_as_manual(self):
+        row = item(expiration_date=date(2026, 11, 20), expiration_source="estimated")
+
+        apply_edit(row, InventoryItemUpdate(expiration_date=date(2026, 11, 25)), TODAY)
+
+        self.assertEqual(row.expiration_date, date(2026, 11, 25))
+        self.assertEqual(row.expiration_source, "manual")
+
+    def test_expiration_date_in_the_past_is_allowed(self):
+        row = item()
+
+        apply_edit(row, InventoryItemUpdate(expiration_date=date(2026, 11, 1)), TODAY)
+
+        self.assertEqual(row.expiration_date, date(2026, 11, 1))
+
     def test_added_at_for_summer_time(self):
         # Israel is UTC+3 in summer
         self.assertEqual(added_at_for(date(2026, 7, 1)), datetime(2026, 7, 1, 9, 0))

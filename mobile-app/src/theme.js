@@ -1,4 +1,4 @@
-// Shared colors and spacing. Item status colors are defined only here (SR-88).
+// Shared colors, spacing and date helpers. Item status colors are defined only here (SR-88).
 export const colors = {
   primary: '#1E6FD9',
   background: '#F5F7FA',
@@ -9,14 +9,15 @@ export const colors = {
   danger: '#DC2626',
 };
 
-// Item color by how long it has been in the fridge.
-// Temporary rule for every product; per-category rules (e.g. dairy) are still to be decided.
-export const FRESH_MAX_DAYS = 5;
+// Item color by days left until its expiration date (SR-123), the same rule for every product:
+// the per-product differences are in the expiration date itself (estimated from each product's shelf life)
+export const SOON_MAX_DAYS = 3;
 
-export const fridgeTimeColors = {
-  fresh: '#16A34A', // green: in the fridge up to FRESH_MAX_DAYS days
-  long: '#EAB308', // yellow: in the fridge longer than that
-  unknown: '#9CA3AF', // gray: no added_at
+export const expiryColors = {
+  fresh: '#16A34A', // green: more than SOON_MAX_DAYS days left
+  soon: '#EAB308', // yellow: 0 to SOON_MAX_DAYS days left (including today)
+  expired: '#DC2626', // red: the date has passed
+  unknown: '#9CA3AF', // gray: no expiration date yet
 };
 
 // Alert colors by severity (SR-92): the strip color and a light background for the card
@@ -59,10 +60,44 @@ export function toIsoDay(day) {
   return `${day.getFullYear()}-${mm}-${dd}`;
 }
 
-// Returns 'fresh' | 'long' | 'unknown' for an item's added_at.
-export function getFridgeTimeStatus(addedAt) {
-  if (!addedAt) return 'unknown';
-  return daysInFridge(addedAt) <= FRESH_MAX_DAYS ? 'fresh' : 'long';
+// "YYYY-MM-DD" as a local Date. new Date("YYYY-MM-DD") would parse it as UTC midnight, which can
+// shift the day by one depending on the phone's time zone.
+export function parseDay(isoDay) {
+  const [year, month, day] = isoDay.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+// Whole days from today until the expiration date (negative = already expired).
+export function daysUntil(isoDay) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.round((parseDay(isoDay) - today) / MS_PER_DAY);
+}
+
+// 'fresh' | 'soon' | 'expired' | 'unknown' for an item's expiration_date
+export function getExpiryStatus(expirationDate) {
+  if (!expirationDate) return 'unknown';
+  const days = daysUntil(expirationDate);
+  if (days < 0) return 'expired';
+  if (days <= SOON_MAX_DAYS) return 'soon';
+  return 'fresh';
+}
+
+// The item's main line. Estimated dates start with "≈" so the user knows they are a guess;
+// a date the user entered (or OCR read) also shows the date itself.
+//   estimated: "≈ 2 days left", "≈ Expires today", "≈ Expired 3 days ago"
+//   manual:    "2 days left · 19/11", "Expired yesterday · 16/11"
+export function describeExpiry(item) {
+  if (!item.expiration_date) return 'No expiry date';
+  const days = daysUntil(item.expiration_date);
+  let text;
+  if (days < -1) text = `Expired ${-days} days ago`;
+  else if (days === -1) text = 'Expired yesterday';
+  else if (days === 0) text = 'Expires today';
+  else if (days === 1) text = '1 day left';
+  else text = `${days} days left`;
+  if (item.expiration_source === 'estimated') return `≈ ${text}`;
+  return `${text} · ${formatDay(parseDay(item.expiration_date)).slice(0, 5)}`;
 }
 
 // "Added today", "1 day in fridge", "5 days in fridge"

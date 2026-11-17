@@ -241,7 +241,7 @@ async def edit_inventory_item(item_id: int, update: InventoryItemUpdate, db: Asy
     await db.commit()
     await db.refresh(row)
     log(logger, "inventory item edited", item_id=item_id, **update.model_dump(exclude_none=True, mode="json"))
-    # A new date added can add or clear a "too long in the fridge" alert
+    # A new expiration date can add or clear an expiry alert
     await alert_hub.broadcast()
     return row
 

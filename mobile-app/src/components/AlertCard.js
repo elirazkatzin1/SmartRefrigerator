@@ -6,8 +6,12 @@ import { colors, severityColors, spacing } from '../theme';
 const ICONS = {
   door_open: 'exit-outline',
   camera_offline: 'videocam-off-outline',
-  long_in_fridge: 'time-outline',
+  expiring_soon: 'hourglass-outline',
+  expired: 'warning-outline',
 };
+
+// Event alerts show since when they are active; expiry alerts already say when in their message
+const EVENT_TYPES = new Set(['door_open', 'camera_offline']);
 
 const SEVERITY_LABELS = { critical: 'Critical', warning: 'Warning', info: 'Info' };
 
@@ -31,8 +35,7 @@ export default function AlertCard({ alert }) {
         <Text style={styles.message}>{alert.message}</Text>
         <Text style={[styles.meta, { color: color.main }]}>
           {SEVERITY_LABELS[alert.severity] ?? alert.severity}
-          {/* "since" only means something for event alerts; long_in_fridge already says how long */}
-          {alert.type !== 'long_in_fridge' && ` · ${since(alert.created_at)}`}
+          {EVENT_TYPES.has(alert.type) && ` · ${since(alert.created_at)}`}
         </Text>
       </View>
     </View>

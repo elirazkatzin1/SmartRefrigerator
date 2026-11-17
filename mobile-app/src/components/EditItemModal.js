@@ -6,49 +6,68 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { updateInventoryItem } from '../api/client';
 import { CATEGORIES } from '../categories';
-import { colors, describeTimeInFridge, formatDay, formatProductName, parseAddedAt, spacing, toIsoDay } from '../theme';
+import {
+  colors,
+  describeExpiry,
+  describeTimeInFridge,
+  formatDay,
+  formatProductName,
+  parseAddedAt,
+  parseDay,
+  spacing,
+  toIsoDay,
+} from '../theme';
 
-// "Edit Item" bottom sheet: fix the date added, category and quantity of one item (SR-91).
-// Stays open with an error message if saving fails; calls onSaved(updatedItem) on success.
+// "Edit Item" bottom sheet: fix the expiration date (SR-123), date added, category and quantity of
+// one item (SR-91). Stays open with an error message if saving fails; calls onSaved(updatedItem) on success.
 export default function EditItemModal({ item, onClose, onSaved }) {
   const insets = useSafeAreaInsets();
+  const [expiresOn, setExpiresOn] = useState(null);
   const [addedOn, setAddedOn] = useState(null);
   const [category, setCategory] = useState(null);
   const [quantity, setQuantity] = useState(1);
-  const [showIosPicker, setShowIosPicker] = useState(false);
+  // Which inline date picker is open on iOS: 'expiry' | 'added' | null
+  const [iosPicker, setIosPicker] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
   // Start from the item's current values every time the sheet opens for an item
   useEffect(() => {
     if (!item) return;
+    setExpiresOn(item.expiration_date ? parseDay(item.expiration_date) : null);
     setAddedOn(parseAddedAt(item.added_at));
     setCategory(item.category);
     setQuantity(item.quantity ?? 1);
-    setShowIosPicker(false);
+    setIosPicker(null);
     setSaving(false);
     setError(null);
   }, [item]);
 
   if (!item || !addedOn) return null;
 
-  const originalDay = toIsoDay(parseAddedAt(item.added_at));
   const changes = {};
-  if (toIsoDay(addedOn) !== originalDay) changes.added_on = toIsoDay(addedOn);
+  if (expiresOn && toIsoDay(expiresOn) !== item.expiration_date) changes.expiration_date = toIsoDay(expiresOn);
+  if (toIsoDay(addedOn) !== toIsoDay(parseAddedAt(item.added_at))) changes.added_on = toIsoDay(addedOn);
   if (category !== item.category) changes.category = category;
   if (quantity !== (item.quantity ?? 1)) changes.quantity = quantity;
   const hasChanges = Object.keys(changes).length > 0;
 
-  const pickDate = () => {
+  // How the expiry field reads right now: the item's own text until the user picks another date
+  const expiryPreview = changes.expiration_date
+    ? describeExpiry({ expiration_date: changes.expiration_date, expiration_source: 'manual' })
+    : describeExpiry(item);
+
+  // Android opens a dialog; iOS shows an inline calendar under the field
+  const pickDate = (which, value, onPick, maximumDate) => {
     if (Platform.OS === 'android') {
       DateTimePickerAndroid.open({
-        value: addedOn,
+        value,
         mode: 'date',
-        maximumDate: new Date(),
-        onChange: (event, day) => event.type === 'set' && day && setAddedOn(day),
+        maximumDate,
+        onChange: (event, day) => event.type === 'set' && day && onPick(day),
       });
     } else {
-      setShowIosPicker((shown) => !shown);
+      setIosPicker((open) => (open === which ? null : which));
     }
   };
 
@@ -73,13 +92,33 @@ export default function EditItemModal({ item, onClose, onSaved }) {
             <Text style={styles.title}>Edit Item</Text>
             <Text style={styles.subtitle}>{formatProductName(item.product_name)}</Text>
 
+            <Text style={styles.label}>Expiry date</Text>
+            <Pressable style={styles.field} onPress={() => pickDate('expiry', expiresOn ?? new Date(), setExpiresOn)}>
+              <Ionicons name="hourglass-outline" size={20} color={colors.primary} />
+              <Text style={styles.fieldText}>{expiresOn ? formatDay(expiresOn) : 'Not set'}</Text>
+              <Text style={styles.fieldHint}>{expiryPreview}</Text>
+            </Pressable>
+            <Text style={styles.help}>
+              {item.expiration_source === 'estimated' && !changes.expiration_date
+                ? 'Estimated from the product type. Copy the date from the package to make it exact.'
+                : 'The date printed on the package.'}
+            </Text>
+            {iosPicker === 'expiry' && (
+              <DateTimePicker
+                value={expiresOn ?? new Date()}
+                mode="date"
+                display="inline"
+                onChange={(event, day) => day && setExpiresOn(day)}
+              />
+            )}
+
             <Text style={styles.label}>Date added</Text>
-            <Pressable style={styles.field} onPress={pickDate}>
+            <Pressable style={styles.field} onPress={() => pickDate('added', addedOn, setAddedOn, new Date())}>
               <Ionicons name="calendar-outline" size={20} color={colors.primary} />
               <Text style={styles.fieldText}>{formatDay(addedOn)}</Text>
               <Text style={styles.fieldHint}>{describeTimeInFridge(addedOn.toISOString())}</Text>
             </Pressable>
-            {showIosPicker && (
+            {iosPicker === 'added' && (
               <DateTimePicker
                 value={addedOn}
                 mode="date"
@@ -161,6 +200,7 @@ const styles = StyleSheet.create({
   },
   fieldText: { fontSize: 16, color: colors.text, fontWeight: '600' },
   fieldHint: { flex: 1, textAlign: 'right', fontSize: 13, color: colors.textMuted },
+  help: { fontSize: 12, color: colors.textMuted, marginTop: spacing.xs },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: spacing.sm },
   chip: {
     paddingVertical: spacing.sm,
