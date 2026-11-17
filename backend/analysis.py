@@ -12,6 +12,7 @@ from datetime import datetime
 
 from sqlalchemy import update
 
+from alerts import alert_hub
 from database import AsyncSessionLocal
 from log import log
 from inventory.diff import ChangeType, ProductChange, current_quantities, diff_inventory
@@ -64,6 +65,12 @@ async def sync_event(event: ReadyEvent) -> None:
         except Exception:
             # E.g. the database itself is down: the log above is all that can be done
             logger.exception("could not record the failed event", extra={"fields": {"event_id": event.event_id}})
+
+    # Even when the inventory update failed, the event tells which cameras sent a photo
+    try:
+        await alert_hub.event_merged(event.camera_ids)
+    except Exception:
+        logger.exception("could not update the alerts", extra={"fields": {"event_id": event.event_id}})
 
 
 async def _update_inventory(event: ReadyEvent) -> None:

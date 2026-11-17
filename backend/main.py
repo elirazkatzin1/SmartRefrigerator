@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -5,11 +6,24 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import cv2
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from alerts import alert_hub
 from analysis import analyze_upload, fail_interrupted_analyses
 from database import get_db
 from inventory.edit import InvalidEdit, apply_edit
@@ -44,7 +58,10 @@ async def lifespan(app: FastAPI):
         log(logger, str(error), logging.WARNING)
     # Analyses a restart cut off would otherwise stay "processing" forever
     await fail_interrupted_analyses()
+    # Resends the alerts periodically, so "N days in the fridge" alerts follow the date
+    refresh_alerts = asyncio.create_task(alert_hub.refresh_forever())
     yield
+    refresh_alerts.cancel()
 
 
 # Initializing the FastAPI application
@@ -81,6 +98,7 @@ async def update_door_status(status: DoorStatusCreate, db: AsyncSession = Depend
     await db.commit()
     await db.refresh(event)
     log(logger, "door opened" if event.door_open else "door closed", uptime_ms=event.uptime_ms)
+    await alert_hub.door_changed(event.door_open)
     return event
 
 #מקבל תמונה כmultipart, שומר אותה בתיקייה storage/images/<event_id> ומפעיל את הניתוח ברקע
@@ -223,4 +241,24 @@ async def edit_inventory_item(item_id: int, update: InventoryItemUpdate, db: Asy
     await db.commit()
     await db.refresh(row)
     log(logger, "inventory item edited", item_id=item_id, **update.model_dump(exclude_none=True, mode="json"))
+    # A new date added can add or clear a "too long in the fridge" alert
+    await alert_hub.broadcast()
     return row
+
+#התראות בזמן אמת לאפליקציה: בכל שינוי נשלחת כל רשימת ההתראות הפעילות
+@app.websocket("/api/v1/ws/alerts")
+async def alerts_socket(websocket: WebSocket):
+    await alert_hub.connect(websocket)
+    try:
+        # The app sends nothing; waiting for a message is how the server notices it disconnected
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        alert_hub.disconnect(websocket)
+
+#דף בדיקה למפתחים: מציג את ההתראות בזמן אמת ומאפשר להפעיל אירועים (דלת, זמן במקרר)
+@app.get("/dev/alerts", include_in_schema=False)
+async def alerts_test_page():
+    return FileResponse(Path(__file__).parent / "dev" / "alerts.html")

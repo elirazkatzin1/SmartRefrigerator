@@ -19,6 +19,13 @@ export const fridgeTimeColors = {
   unknown: '#9CA3AF', // gray: no added_at
 };
 
+// Alert colors by severity (SR-92): the strip color and a light background for the card
+export const severityColors = {
+  critical: { main: '#DC2626', background: '#FEF2F2' },
+  warning: { main: '#D97706', background: '#FFFBEB' },
+  info: { main: '#1E6FD9', background: '#EFF6FF' },
+};
+
 export const spacing = { xs: 4, sm: 8, md: 16, lg: 24 };
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
