@@ -9,7 +9,7 @@ import InventoryItemRow from '../../src/components/InventoryItemRow';
 import { EmptyState, ErrorState, LoadingState } from '../../src/components/StateViews';
 import { useApi } from '../../src/hooks/useApi';
 import { syncExpiryReminders } from '../../src/notifications';
-import { colors, formatProductName, getExpiryStatus, SOON_MAX_DAYS, spacing } from '../../src/theme';
+import { colors, expiryColors, formatProductName, getExpiryStatus, SOON_MAX_DAYS, spacing } from '../../src/theme';
 
 // While the Fridge tab is open, reload in the background this often. The backend has no
 // push channel yet, so this is how a door-close event shows up in the list. Once the
@@ -46,20 +46,57 @@ function matchesFilters(item, category, expiry) {
   return true;
 }
 
-// Header above the list: how many different products are in the fridge, and below it the
-// total units (6 tomatoes count as 1 product and 6 units)
-function InventoryTotal({ items }) {
-  const units = items.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
+// One counter in the summary card. Tapping it filters the list to those products; tapping the
+// active one again shows everything
+function ExpiryStat({ status, label, count, active, onPress }) {
+  const color = expiryColors[status];
   return (
-    <View style={styles.total}>
-      <Text style={styles.totalNumber}>{items.length}</Text>
-      <View>
-        <Text style={styles.totalLabel}>
-          {items.length === 1 ? 'product' : 'products'} in the fridge
-        </Text>
-        <Text style={styles.totalSub}>
-          {units} {units === 1 ? 'unit' : 'units'} in total
-        </Text>
+    <Pressable
+      style={[styles.stat, active && { borderColor: color, backgroundColor: `${color}1A` }]}
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+    >
+      <Text style={[styles.statNumber, { color: count ? color : colors.textMuted }]}>{count}</Text>
+      <Text style={styles.statLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
+// Summary card above the list: how many different products are in the fridge and how many units
+// (6 tomatoes count as 1 product and 6 units), and how many are expiring soon or expired (SR-123)
+function InventorySummary({ items, expiry, onFilter }) {
+  const units = items.reduce((sum, item) => sum + (item.quantity ?? 1), 0);
+  const count = (status) => items.filter((item) => getExpiryStatus(item.expiration_date) === status).length;
+  const toggle = (status) => onFilter(expiry === status ? ALL : status);
+  return (
+    <View style={styles.summary}>
+      <View style={styles.total}>
+        <Text style={styles.totalNumber}>{items.length}</Text>
+        <View>
+          <Text style={styles.totalLabel}>
+            {items.length === 1 ? 'product' : 'products'} in the fridge
+          </Text>
+          <Text style={styles.totalSub}>
+            {units} {units === 1 ? 'unit' : 'units'} in total
+          </Text>
+        </View>
+      </View>
+      <View style={styles.stats}>
+        <ExpiryStat
+          status="soon"
+          label="Expiring soon"
+          count={count('soon')}
+          active={expiry === 'soon'}
+          onPress={() => toggle('soon')}
+        />
+        <ExpiryStat
+          status="expired"
+          label="Expired"
+          count={count('expired')}
+          active={expiry === 'expired'}
+          onPress={() => toggle('expired')}
+        />
       </View>
     </View>
   );
@@ -131,7 +168,7 @@ export default function FridgeScreen() {
             {error && <Text style={styles.staleBanner}>Couldn't refresh: {error.message}</Text>}
             {items.length > 0 && (
               <>
-                <InventoryTotal items={items} />
+                <InventorySummary items={items} expiry={expiry} onFilter={setExpiry} />
                 <View style={styles.filters}>
                   <FilterDropdown
                     title="Category"
@@ -190,9 +227,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: spacing.sm,
   },
-  total: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  summary: {
     gap: spacing.md,
     padding: spacing.md,
     borderRadius: 12,
@@ -200,6 +235,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
   },
+  total: { flexDirection: 'row', alignItems: 'center', gap: spacing.md },
+  stats: { flexDirection: 'row', gap: spacing.sm },
+  stat: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  statNumber: { fontSize: 22, fontWeight: '700' },
+  statLabel: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
   totalNumber: { fontSize: 34, fontWeight: '700', color: colors.primary },
   totalLabel: { fontSize: 16, fontWeight: '600', color: colors.text },
   totalSub: { fontSize: 13, color: colors.textMuted, marginTop: 2 },
