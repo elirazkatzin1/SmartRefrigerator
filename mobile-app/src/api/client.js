@@ -1,11 +1,28 @@
+import Constants from 'expo-constants';
+
 // Every call to the backend goes through this module (SR-88).
-//
-// The base URL comes from EXPO_PUBLIC_API_URL (see .env.example). On a real phone
-// "localhost" is the phone itself, so set it to the computer's LAN IP, e.g.
-// EXPO_PUBLIC_API_URL=http://192.168.1.20:8000/api/v1
-export const API_BASE_URL = (
-  process.env.EXPO_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
-).replace(/\/+$/, '');
+
+const BACKEND_PORT = 8000;
+
+// The computer running `expo start`, as the phone sees it, e.g. "10.0.0.12".
+// Expo Go loaded the app from that computer, and the backend runs on the same one, so this
+// follows the computer to whatever network it is on (home WiFi, hotspot...) with no config.
+function devServerHost() {
+  const hostUri = Constants.expoConfig?.hostUri ?? Constants.expoGoConfig?.debuggerHost;
+  const host = hostUri?.split(':')[0];
+  // With `expo start --tunnel` the host is an Expo tunnel domain, which does not forward port 8000
+  if (!host || host.endsWith('.exp.direct')) return null;
+  return host;
+}
+
+function resolveBaseUrl() {
+  // Explicit override (see .env.example), for a tunnel or a deployed server
+  if (process.env.EXPO_PUBLIC_API_URL) return process.env.EXPO_PUBLIC_API_URL;
+  const host = devServerHost();
+  return `http://${host ?? 'localhost'}:${BACKEND_PORT}/api/v1`;
+}
+
+export const API_BASE_URL = resolveBaseUrl().replace(/\/+$/, '');
 
 const REQUEST_TIMEOUT_MS = 10000;
 
