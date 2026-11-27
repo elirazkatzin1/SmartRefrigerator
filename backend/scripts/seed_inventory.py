@@ -29,21 +29,21 @@ LOCAL_TZ = ZoneInfo("Asia/Jerusalem")
 #  days until expiration or None for no date, days since it was put in the fridge)
 SAMPLE_ITEMS = [
     ("milk", 1, 2, 5),
-    ("cottage_cheese", 2, 6, 1),
+    ("white_cheese", 2, 6, 1),
     ("yellow_cheese", 1, 12, 3),
-    ("yogurt", 4, -1, 5),
+    ("cream_cheese", 4, -1, 5),
     ("eggs", 12, 20, 7),
     ("tomato", 6, 5, 2),
     ("cucumber", 4, 3, 4),
     ("lettuce", 1, 0, 6),
     ("lemon", 3, 8, 10),
-    ("hummus", 1, -3, 9),
+    ("garlic_sauce", 1, -3, 9),
     ("ketchup", 1, None, 30),
-    ("tortillas", 1, 1, 0),
+    ("whipping_cream", 1, 1, 0),
 ]
 SAMPLE_NAMES = [name for name, *_ in SAMPLE_ITEMS]
 # These have a date "copied from the package"; the rest have an estimated one, as the cameras' products will (SR-123)
-MANUAL_DATES = {"milk", "yogurt"}
+MANUAL_DATES = {"milk", "cream_cheese"}
 
 # Shopping list samples (SR-94): (name, catalog product_name or None, source)
 SAMPLE_SHOPPING = [
