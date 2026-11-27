@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alerts Test Page</title>
+<!--
+  Development page for the real-time alerts (SR-92), served at /dev/alerts.
+  Shows the WebSocket /api/v1/ws/alerts live and triggers the events that change it, using the
+  regular API. It has no camera-event button on purpose: fake uploads would be saved into
+  storage/images (the training data) and count as a door event that changes the inventory.
+-->
+<style>
+  :root {
+    --bg: #f5f7fa; --surface: #fff; --text: #1a1d21; --muted: #6b7280; --border: #e5e7eb;
+    --primary: #1e6fd9; --green: #16a34a; --red: #dc2626;
+    --critical: #dc2626; --critical-bg: #fef2f2;
+    --warning: #d97706; --warning-bg: #fffbeb;
+    --info: #1e6fd9; --info-bg: #eff6ff;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 20px; }
+  .grid { display: grid; grid-template-columns: 1.3fr 1fr; gap: 16px; }
+  @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .head h2 { margin: 0; }
+  .status { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .alerts { display: flex; flex-direction: column; gap: 8px; }
+  .alert { border-left: 5px solid; border-radius: 8px; padding: 10px 12px; }
+  .alert .msg { font-weight: 500; }
+  .alert .meta { font-size: 12px; font-weight: 600; margin-top: 2px; }
+  .alert code { font-weight: 400; color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 24px 0; }
+  .control + .control { border-top: 1px solid var(--border); margin-top: 16px; padding-top: 16px; }
+  .control h3 { font-size: 14px; margin: 0 0 4px; }
+  .control p { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  button { font: inherit; font-weight: 600; border: 0; border-radius: 8px; padding: 8px 14px; cursor: pointer; background: var(--primary); color: #fff; }
+  button.secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+  button:disabled { opacity: .5; cursor: default; }
+  select, input { font: inherit; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+  input[type=number] { width: 80px; }
+  #doorState { font-size: 13px; color: var(--muted); }
+  .log { margin-top: 16px; }
+  #log { font: 12px/1.6 ui-monospace, Consolas, monospace; max-height: 260px; overflow: auto; background: #0f172a; color: #e2e8f0; border-radius: 8px; padding: 10px 12px; }
+  #log .time { color: #94a3b8; }
+  #log .in { color: #7dd3fc; }
+  #log .out { color: #fcd34d; }
+  #log .err { color: #fca5a5; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Alerts Test Page</h1>
+  <p class="sub">Live view of <code>/api/v1/ws/alerts</code> (SR-92). Use the buttons to trigger events and watch the list change, just as the app's Home screen does.</p>
+
+  <div class="grid">
+    <section class="card">
+      <div class="head">
+        <h2>Active alerts <span id="count"></span></h2>
+        <div class="status"><span class="dot" id="dot"></span><span id="statusText">Connecting...</span></div>
+      </div>
+      <div class="alerts" id="alerts"><div class="empty">Waiting for the server...</div></div>
+    </section>
+
+    <section class="card">
+      <h2>Trigger events</h2>
+
+      <div class="control">
+        <h3>Door</h3>
+        <p>Open the door and leave it: a <b>door_open</b> warning arrives after 2 minutes. Closing clears it.</p>
+        <div class="row">
+          <button id="doorOpen">Open door</button>
+          <button id="doorClose" class="secondary">Close door</button>
+          <span id="doorState"></span>
+        </div>
+      </div>
+
+      <div class="control">
+        <h3>Expiry</h3>
+        <p>Set how many days a product has left (as if the user entered the date). 0-2 days raises <b>expiring_soon</b>, below 0 <b>expired</b>; 3 or more clears it.</p>
+        <div class="row">
+          <select id="item"><option>Loading...</option></select>
+          <input id="days" type="number" value="1" aria-label="Days left">
+          <span>days left</span>
+          <button id="setDate">Set</button>
+        </div>
+      </div>
+
+      <div class="control">
+        <h3>Camera offline</h3>
+        <p>Raised when a camera's photo is missing from a door event. There's no button for it: fake uploads would go into the training images and change the inventory. It's covered by <code>tests/test_alerts.py</code>.</p>
+      </div>
+    </section>
+  </div>
+
+  <section class="card log">
+    <div class="head"><h2>Log</h2><button id="clearLog" class="secondary">Clear</button></div>
+    <div id="log"></div>
+  </section>
+</main>
+
+<script>
+const API = '/api/v1';
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}${API}/ws/alerts`;
+const RETRY_DELAYS_MS = [1000, 2000, 5000, 10000];
+const $ = (id) => document.getElementById(id);
+
+// ---- log ----
+function log(kind, text) {
+  const line = document.createElement('div');
+  const time = document.createElement('span');
+  time.className = 'time';
+  time.textContent = new Date().toLocaleTimeString('en-GB') + '  ';
+  const body = document.createElement('span');
+  body.className = kind;
+  body.textContent = text;
+  line.append(time, body);
+  $('log').append(line);
+  $('log').scrollTop = $('log').scrollHeight;
+}
+$('clearLog').onclick = () => { $('log').textContent = ''; };
+
+// ---- alerts list ----
+function renderAlerts(alerts) {
+  const box = $('alerts');
+  box.textContent = '';
+  $('count').textContent = `(${alerts.length})`;
+  if (!alerts.length) {
+    box.innerHTML = '<div class="empty">No alerts right now</div>';
+    return;
+  }
+  for (const alert of alerts) {
+    const card = document.createElement('div');
+    card.className = 'alert';
+    card.style.borderColor = `var(--${alert.severity})`;
+    card.style.background = `var(--${alert.severity}-bg)`;
+    const msg = document.createElement('div');
+    msg.className = 'msg';
+    msg.textContent = alert.message;
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    meta.style.color = `var(--${alert.severity})`;
+    meta.textContent = `${alert.severity} · ${alert.type} `;
+    const id = document.createElement('code');
+    id.textContent = alert.id;
+    meta.append(id);
+    card.append(msg, meta);
+    box.append(card);
+  }
+}
+
+function setStatus(state) {
+  const states = {
+    connected: ['var(--green)', 'Live'],
+    connecting: ['var(--muted)', 'Connecting...'],
+    disconnected: ['var(--red)', 'Offline, retrying'],
+  };
+  const [color, label] = states[state];
+  $('dot').style.background = color;
+  $('statusText').textContent = label;
+  $('statusText').style.color = color;
+}
+
+// ---- WebSocket, reconnecting like the app does ----
+let attempt = 0;
+function connect() {
+  setStatus('connecting');
+  const socket = new WebSocket(WS_URL);
+  socket.onopen = () => { attempt = 0; setStatus('connected'); log('in', `connected to ${WS_URL}`); };
+  socket.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    log('in', `← ${message.type}: ${message.alerts.length} alerts [${message.alerts.map((a) => a.id).join(', ')}]`);
+    if (message.type === 'alerts') renderAlerts(message.alerts);
+  };
+  socket.onclose = () => {
+    setStatus('disconnected');
+    const delay = RETRY_DELAYS_MS[Math.min(attempt++, RETRY_DELAYS_MS.length - 1)];
+    log('err', `connection closed, retrying in ${delay / 1000}s`);
+    setTimeout(connect, delay);
+  };
+}
+connect();
+
+// ---- API calls ----
+async function call(method, path, body) {
+  log('out', `→ ${method} ${path}${body ? ' ' + JSON.stringify(body) : ''}`);
+  const response = await fetch(API + path, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const detail = typeof data?.detail === 'string' ? data.detail : JSON.stringify(data?.detail);
+    log('err', `✗ ${response.status} ${detail ?? response.statusText}`);
+    throw new Error(detail);
+  }
+  log('out', `✓ ${response.status}`);
+  return data;
+}
+
+// ---- door ----
+let doorTimer = null;
+async function door(open) {
+  await call('POST', '/fridge/status', { door_open: open, uptime_ms: Math.floor(performance.now()) });
+  clearInterval(doorTimer);
+  if (open) {
+    const since = Date.now();
+    const tick = () => {
+      const s = Math.floor((Date.now() - since) / 1000);
+      $('doorState').textContent = `open for ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+    };
+    tick();
+    doorTimer = setInterval(tick, 1000);
+  } else {
+    $('doorState').textContent = 'closed';
+  }
+}
+$('doorOpen').onclick = () => door(true).catch(() => {});
+$('doorClose').onclick = () => door(false).catch(() => {});
+
+// ---- expiry ----
+const displayName = (name) => { const w = name.replace(/_/g, ' '); return w.charAt(0).toUpperCase() + w.slice(1); };
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+async function loadItems() {
+  const items = await call('GET', '/inventory');
+  const select = $('item');
+  select.textContent = '';
+  for (const item of items) {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = `${displayName(item.product_name)} (#${item.id})`;
+    select.append(option);
+  }
+  if (!items.length) select.innerHTML = '<option disabled>The fridge is empty</option>';
+  $('setDate').disabled = !items.length;
+}
+$('setDate').onclick = async () => {
+  const day = new Date();
+  day.setDate(day.getDate() + Number($('days').value || 0));
+  await call('PATCH', `/inventory/${$('item').value}`, { expiration_date: isoDay(day) }).catch(() => {});
+};
+loadItems().catch(() => {});
+</script>
+</body>
+</html>

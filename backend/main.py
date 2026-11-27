@@ -7,16 +7,41 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import cv2
-from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Response, UploadFile
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Response,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from alerts import alert_hub
 from analysis import analyze_upload, fail_interrupted_analyses
 from database import get_db
+from inventory.edit import InvalidEdit, apply_edit
 from log import configure_logging, log
-from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory
-from schemas import DoorStatusCreate, DoorStatusResponse, EventAnalysisResponse, InventoryItemResponse
+import shopping
+from models import AnalysisStatus, DoorEvent, EventAnalysis, FridgeState, ImageAnalysis, Inventory, ShoppingItem
+from schemas import (
+    DoorStatusCreate,
+    DoorStatusResponse,
+    EventAnalysisResponse,
+    FridgeStateResponse,
+    InventoryItemResponse,
+    InventoryItemUpdate,
+    ShoppingItemCreate,
+    ShoppingItemResponse,
+    ShoppingItemUpdate,
+)
 from vision import detector
 from vision.calibration import undistort
 from vision.draw import draw_detections
@@ -39,7 +64,10 @@ async def lifespan(app: FastAPI):
         log(logger, str(error), logging.WARNING)
     # Analyses a restart cut off would otherwise stay "processing" forever
     await fail_interrupted_analyses()
+    # Resends the alerts periodically, so "N days in the fridge" alerts follow the date
+    refresh_alerts = asyncio.create_task(alert_hub.refresh_forever())
     yield
+    refresh_alerts.cancel()
 
 
 # Initializing the FastAPI application
@@ -92,6 +120,7 @@ async def update_door_status(status: DoorStatusCreate, db: AsyncSession = Depend
     await db.commit()
     await db.refresh(event)
     log(logger, "door opened" if event.door_open else "door closed", uptime_ms=event.uptime_ms)
+    await alert_hub.door_changed(event.door_open)
     return event
 
 #מקבל תמונה כmultipart, שומר אותה בתיקייה storage/images/<מספר>_<event_id> ומפעיל את הניתוח ברקע
@@ -220,3 +249,89 @@ async def get_expired_inventory(db: AsyncSession = Depends(get_db)):
         .order_by(Inventory.expiration_date)
     )
     return result.scalars().all()
+
+#עריכה ידנית של מוצר מהאפליקציה: תאריך הכנסה, קטגוריה, כמות
+@app.patch("/api/v1/inventory/{item_id}", response_model=InventoryItemResponse)
+async def edit_inventory_item(item_id: int, update: InventoryItemUpdate, db: AsyncSession = Depends(get_db)):
+    row = await db.get(Inventory, item_id)
+    # A removed product is history, not inventory, so it can't be edited either
+    if row is None or row.removed_at is not None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    try:
+        apply_edit(row, update, datetime.now(LOCAL_TZ).date())
+    except InvalidEdit as error:
+        raise HTTPException(status_code=422, detail=str(error))
+    await db.commit()
+    await db.refresh(row)
+    log(logger, "inventory item edited", item_id=item_id, **update.model_dump(exclude_none=True, mode="json"))
+    # A new expiration date can add or clear an expiry alert
+    await alert_hub.broadcast()
+    return row
+
+#התראות בזמן אמת לאפליקציה: בכל שינוי נשלחת כל רשימת ההתראות הפעילות
+@app.websocket("/api/v1/ws/alerts")
+async def alerts_socket(websocket: WebSocket):
+    await alert_hub.connect(websocket)
+    try:
+        # The app sends nothing; waiting for a message is how the server notices it disconnected
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        pass
+    finally:
+        alert_hub.disconnect(websocket)
+
+#מצב המקרר למסך ההגדרות: אירוע הדלת האחרון, התמונה האחרונה ומצלמות שלא שלחו תמונה
+@app.get("/api/v1/fridge/state", response_model=FridgeStateResponse)
+async def get_fridge_state(db: AsyncSession = Depends(get_db)):
+    last_door = (await db.execute(select(DoorEvent).order_by(DoorEvent.created_at.desc()).limit(1))).scalar_one_or_none()
+    state = await db.get(FridgeState, FRIDGE_STATE_ID)
+    return FridgeStateResponse(
+        door_open=last_door.door_open if last_door else None,
+        last_door_event_at=last_door.created_at if last_door else None,
+        last_image_at=state.last_image_taken if state else None,
+        expected_cameras=alert_hub.expected_cameras,
+        offline_cameras=alert_hub.offline_cameras(),
+    )
+
+#רשימת הקניות: קודם מה שעוד צריך לקנות, אחר כך מה שכבר נקנה
+@app.get("/api/v1/shopping-list", response_model=list[ShoppingItemResponse])
+async def get_shopping_list(db: AsyncSession = Depends(get_db)):
+    return await shopping.list_items(db)
+
+#הוספת פריט שהמשתמש הקליד
+@app.post("/api/v1/shopping-list", response_model=ShoppingItemResponse, status_code=201)
+async def add_shopping_item(item: ShoppingItemCreate, db: AsyncSession = Depends(get_db)):
+    try:
+        return await shopping.add_manual(db, item.name)
+    except shopping.DuplicateItem as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error))
+
+#מחיקת כל מה שסומן כנקנה. מוגדר לפני /{item_id}, אחרת "checked" היה נקרא כמזהה
+@app.delete("/api/v1/shopping-list/checked", status_code=204)
+async def clear_bought_items(db: AsyncSession = Depends(get_db)):
+    await shopping.clear_checked(db)
+
+#סימון פריט כנקנה (או ביטול הסימון)
+@app.patch("/api/v1/shopping-list/{item_id}", response_model=ShoppingItemResponse)
+async def update_shopping_item(item_id: int, update: ShoppingItemUpdate, db: AsyncSession = Depends(get_db)):
+    item = await db.get(ShoppingItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    return await shopping.set_checked(db, item, update.checked)
+
+#מחיקת פריט מהרשימה
+@app.delete("/api/v1/shopping-list/{item_id}", status_code=204)
+async def delete_shopping_item(item_id: int, db: AsyncSession = Depends(get_db)):
+    item = await db.get(ShoppingItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Item not found")
+    await db.delete(item)
+    await db.commit()
+
+#דף בדיקה למפתחים: מציג את ההתראות בזמן אמת ומאפשר להפעיל אירועים (דלת, זמן במקרר)
+@app.get("/dev/alerts", include_in_schema=False)
+async def alerts_test_page():
+    return FileResponse(Path(__file__).parent / "dev" / "alerts.html")

@@ -12,6 +12,8 @@ from datetime import datetime
 
 from sqlalchemy import update
 
+import shopping
+from alerts import alert_hub
 from database import AsyncSessionLocal
 from log import log
 from inventory.diff import ChangeType, ProductChange, current_quantities, diff_inventory
@@ -52,7 +54,7 @@ async def sync_event(event: ReadyEvent) -> None:
     existing inventory doesn't change, and the event is recorded with the error instead.
     """
     try:
-        await _update_inventory(event)
+        removed = await _update_inventory(event)
     except Exception as error:
         logger.exception("inventory update failed, inventory left unchanged",
                          extra={"fields": {"event_id": event.event_id, "error": _describe(error)}})
@@ -64,9 +66,25 @@ async def sync_event(event: ReadyEvent) -> None:
         except Exception:
             # E.g. the database itself is down: the log above is all that can be done
             logger.exception("could not record the failed event", extra={"fields": {"event_id": event.event_id}})
+    else:
+        # Products that ran out may go on the shopping list (SR-94). Separate from the inventory update,
+        # so a problem here never undoes it
+        if removed:
+            try:
+                async with AsyncSessionLocal() as db:
+                    await shopping.add_ran_out_products(db, removed)
+            except Exception:
+                logger.exception("could not update the shopping list", extra={"fields": {"event_id": event.event_id}})
+
+    # Even when the inventory update failed, the event tells which cameras sent a photo
+    try:
+        await alert_hub.event_merged(event.camera_ids)
+    except Exception:
+        logger.exception("could not update the alerts", extra={"fields": {"event_id": event.event_id}})
 
 
-async def _update_inventory(event: ReadyEvent) -> None:
+async def _update_inventory(event: ReadyEvent) -> set[str]:
+    """Returns the names of the products removed from the inventory in this event."""
     async with AsyncSessionLocal() as db:
         snapshot = await build_snapshot(db, event.event_id)
         changes = diff_inventory(snapshot, await current_quantities(db))
@@ -93,6 +111,7 @@ async def _update_inventory(event: ReadyEvent) -> None:
         by_kind.setdefault(change["change"], []).append(entry)
     log(logger, "inventory updated", event_id=event.event_id, cameras=sorted(event.camera_ids),
         timed_out=event.timed_out, products=len(snapshot), **by_kind)
+    return removed
 
 
 collector = EventCollector(sync_event)
