@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.engine import make_url
 
 from database import Base
+from inventory.camera_layout import FRAME_WIDTH
 from inventory.diff import current_quantities, diff_inventory
 from inventory.merge import build_snapshot, merge_detections
 from inventory.update import apply_quantities, apply_removals
@@ -42,8 +43,12 @@ async def ensure_test_database() -> None:
         await connection.close()
 
 
-def detection(class_name: str, confidence: float = 0.9) -> dict:
-    return {"class_name": class_name, "category": None, "confidence": confidence, "bbox": [0, 0, 10, 10]}
+def detection(class_name: str, confidence: float = 0.9, x: float = 0.5) -> dict:
+    """A detection centered at x (a fraction of the image width): by default the middle of the image,
+    outside every overlap strip between cameras (inventory.camera_layout)."""
+    center = round(x * FRAME_WIDTH)
+    return {"class_name": class_name, "category": None, "confidence": confidence,
+            "bbox": [center - 20, 100, center + 20, 200]}
 
 
 class InventoryFlowTest(unittest.IsolatedAsyncioTestCase):
@@ -140,18 +145,19 @@ class InventoryFlowTest(unittest.IsolatedAsyncioTestCase):
 
     # Several cameras
 
-    async def test_product_seen_by_several_cameras_is_counted_once(self):
-        quantities = await self.door_event({1: [detection("milk")], 2: [detection("milk")], 3: [detection("milk")]})
+    async def test_product_seen_by_two_overlapping_cameras_is_counted_once(self):
+        # The mustard between the upper-shelf cameras, at camera 4's right edge and camera 1's left edge
+        quantities = await self.door_event({4: [detection("mustard", x=0.93)], 1: [detection("mustard", x=0.06)]})
 
-        self.assertEqual(quantities, {"milk": 1})
+        self.assertEqual(quantities, {"mustard": 1})
 
-    async def test_cameras_see_different_products(self):
+    async def test_cameras_on_different_shelves_add_up(self):
         quantities = await self.door_event({
             1: [detection("milk"), detection("yogurt"), detection("yogurt")],
             2: [detection("yogurt"), detection("yogurt"), detection("yogurt"), detection("carrot")],
         })
 
-        self.assertEqual(quantities, {"milk": 1, "yogurt": 3, "carrot": 1})
+        self.assertEqual(quantities, {"milk": 1, "yogurt": 5, "carrot": 1})
 
     async def test_product_seen_by_one_camera_only_is_not_missing(self):
         await self.door_event({1: [detection("milk")], 2: [detection("lemon")]})
