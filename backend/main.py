@@ -1,4 +1,6 @@
+import asyncio
 import logging
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -54,6 +56,22 @@ EVENT_ID_PATTERN = r"^[0-9a-f]{16}$"
 FRIDGE_STATE_ID = 1
 # Expiration dates are local dates, so "today" is computed in Israel time, not the server's UTC
 LOCAL_TZ = ZoneInfo("Asia/Jerusalem")
+# Folders are numbered in arrival order, "0001_<event_id>", so the highest number is the latest door event
+EVENT_FOLDER_PATTERN = re.compile(r"^(\d+)_([0-9a-f]{16})$")
+# The cameras of one event upload together: only one request at a time may pick the next number
+_event_folder_lock = asyncio.Lock()
+
+
+def _find_or_number_event_folder(event_id: str) -> str:
+    """The event's folder name: the existing one, or the next number if this is its first image."""
+    numbers = [0]
+    for folder in IMAGES_DIR.iterdir() if IMAGES_DIR.exists() else []:
+        match = EVENT_FOLDER_PATTERN.match(folder.name)
+        if match:
+            if match.group(2) == event_id:
+                return folder.name
+            numbers.append(int(match.group(1)))
+    return f"{max(numbers) + 1:04d}_{event_id}"
 
 #בדיקה שהשרת רץ
 @app.get("/")
@@ -76,7 +94,7 @@ async def update_door_status(status: DoorStatusCreate, db: AsyncSession = Depend
     log(logger, "door opened" if event.door_open else "door closed", uptime_ms=event.uptime_ms)
     return event
 
-#מקבל תמונה כmultipart, שומר אותה בתיקייה storage/images/<event_id> ומפעיל את הניתוח ברקע
+#מקבל תמונה כmultipart, שומר אותה בתיקייה storage/images/<מספר>_<event_id> ומפעיל את הניתוח ברקע
 @app.post("/api/v1/fridge/upload-image", status_code=201)
 async def upload_image(
     background_tasks: BackgroundTasks,
@@ -96,12 +114,13 @@ async def upload_image(
     if not image_bytes:
         raise HTTPException(status_code=400, detail="Empty image file")
 
-    # All the cameras of one door-close event share a directory, one file per camera.
+    # All the cameras of one door-close event share a numbered directory, one file per camera.
     # The camera always sends "fridge.jpg", so the name is built from camera_id instead
     taken_at = datetime.utcnow()
-    event_dir = IMAGES_DIR / event_id
-    filename = f"{event_id}/cam{camera_id}{extension}"
-    event_dir.mkdir(parents=True, exist_ok=True)
+    async with _event_folder_lock:
+        folder = await run_in_threadpool(_find_or_number_event_folder, event_id)
+        (IMAGES_DIR / folder).mkdir(parents=True, exist_ok=True)
+    filename = f"{folder}/cam{camera_id}{extension}"
     await run_in_threadpool((IMAGES_DIR / filename).write_bytes, image_bytes)
 
     # Only after the image is safely on disk, record it in the single fridge state row
