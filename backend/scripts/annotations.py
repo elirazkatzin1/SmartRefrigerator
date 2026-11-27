@@ -4,7 +4,7 @@ Run inside the backend container:
     docker compose run --rm --no-deps web python -m scripts.annotations prepare
     docker compose run --rm --no-deps web python -m scripts.annotations import storage/<export dir>
 
-prepare: copies every camera image (storage/images/<event_id>/cam<N>.jpg) and converted phone photo
+prepare: copies every camera image (storage/images/<number>_<event_id>/cam<N>.jpg) and converted phone photo
     (storage/phone_esp32) into storage/to_label with a unique flat name, and writes
     storage/to_label/classes.txt with the class names to create in the labeling tool.
 

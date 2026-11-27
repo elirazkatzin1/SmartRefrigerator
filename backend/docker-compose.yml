@@ -12,7 +12,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://hadar_admin:my_secret_password@db:5432/fridge_inventory
       # Cameras installed so far. A door-close event is merged once this many images are analyzed
       # (or after EVENT_TIMEOUT_S), so raise it as cameras are added, up to 5
-      - EXPECTED_CAMERAS=2
+      - EXPECTED_CAMERAS=4
     depends_on:
       db:
         condition: service_healthy

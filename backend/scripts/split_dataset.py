@@ -35,8 +35,8 @@ YOLO_DIR = STORAGE_DIR / "yolo"
 SPLITS = {"train": 0.7, "val": 0.2, "test": 0.1}
 # Fixed so that running the script again on the same images gives the same split
 SEED = 0
-# Camera images are named <event_id>_cam<N> by `annotations prepare`
-EVENT_ID = re.compile(r"^([0-9a-f]{16})_cam\d")
+# Camera images are named [<number>_]<event_id>_cam<N> by `annotations prepare`
+EVENT_ID = re.compile(r"^(?:\d+_)?([0-9a-f]{16})_cam\d")
 # Enhanced images are saved as JPEG again: high quality, so the compression adds little
 ENHANCED_JPEG_QUALITY = 95
 

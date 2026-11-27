@@ -50,7 +50,7 @@ class ImageAnalysis(Base):
     __tablename__ = "image_analysis"
 
     id = Column(Integer, primary_key=True, index=True)
-    # Path under storage/images, e.g. "a3f09c1e7b2d4410/cam1.jpg". Unique: a camera that re-sends
+    # Path under storage/images, e.g. "0007_a3f09c1e7b2d4410/cam1.jpg". Unique: a camera that re-sends
     # an image (its upload queue retries when no response arrived) overwrites the same file
     filename = Column(String, nullable=False, unique=True)
     camera_id = Column(Integer, nullable=False)
