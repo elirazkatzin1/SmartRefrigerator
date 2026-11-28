@@ -73,12 +73,15 @@ void setup() {
   Serial.println("\n\n=== SETUP STARTING ===");
   Serial.printf("Camera ID: %d (%s)\n", CAMERA_ID, IS_DOOR_MASTER ? "door master" : "follower");
 
+  // המצלמה לפני חיישן הדלת: שתיהן משתמשות בשירות הפסיקות של ה-GPIO. מי שמאותחל ראשון מתקין אותו,
+  // והדרייבר של המצלמה צריך להתקין אותו בהגדרות שלו. כשהחיישן היה ראשון, הדרייבר הדפיס
+  // "GPIO isr service already installed" והמצלמה הראשית לא צילמה בחלק מסגירות הדלת
+  initCamera();
+
   if (IS_DOOR_MASTER) {
     bool doorOpen = initDoorSensor();
     Serial.println(doorOpen ? "Door initial state: OPEN" : "Door initial state: CLOSED");
   }
-
-  initCamera();
   connectToWiFi();
   initEventSync();
   Serial.println("=== SETUP DONE ===");
