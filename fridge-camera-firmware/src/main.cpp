@@ -30,6 +30,14 @@ void captureAndQueue(const String &eventId) {
   }
 }
 
+// חיישן הדלת מדווח "סגור" כשהמגנט מתקרב, עוד לפני שהדלת נסגרה עד הסוף. מחכים שהדלת והמוצרים
+// שבה יפסיקו לזוז, אחרת התמונות מטושטשות
+#define CAPTURE_DELAY_MS 700
+
+static bool capturePending = false;
+static unsigned long captureAt = 0;
+static String pendingEventId;
+
 // הלוח המרכזי: מה קורה כשמצב הדלת משתנה
 void handleDoorChange(bool isOpen) {
   Serial.println(isOpen ? "Door OPENED" : "Door CLOSED");
@@ -38,14 +46,25 @@ void handleDoorChange(bool isOpen) {
     return;
   }
 
-  // קודם משדרים לשאר המצלמות (כמה מילישניות), כדי שכל 5 המצלמות יצלמו כמעט באותו רגע.
-  // השידור עובד גם כשהדלת סגורה, כי כל הלוחות נמצאים יחד בתוך המקרר
   String eventId = generateEventId();
-  Serial.printf("Door close event: %s\n", eventId.c_str());
-  broadcastCaptureEvent(eventId);
-
+  Serial.printf("Door close event: %s (capture in %d ms)\n", eventId.c_str(), CAPTURE_DELAY_MS);
   queueDoorStatus(false, eventId);
-  captureAndQueue(eventId);
+
+  // הצילום עצמו קורה ב-loop אחרי ההמתנה, בלי לעצור את הלוח (ה-WiFi ותור השליחה ממשיכים לעבוד)
+  pendingEventId = eventId;
+  captureAt = millis() + CAPTURE_DELAY_MS;
+  capturePending = true;
+}
+
+// אחרי ההמתנה: קודם משדרים לשאר המצלמות (כמה מילישניות), כדי שכולן יצלמו כמעט באותו רגע,
+// ואז מצלמים. השידור עובד גם כשהדלת סגורה, כי כל הלוחות נמצאים יחד בתוך המקרר
+void runPendingCapture() {
+  if (!capturePending || (long)(millis() - captureAt) < 0) {
+    return;
+  }
+  capturePending = false;
+  broadcastCaptureEvent(pendingEventId);
+  captureAndQueue(pendingEventId);
 }
 
 void setup() {
@@ -73,6 +92,7 @@ void loop() {
     if (pollDoorChange(doorOpen)) {
       handleDoorChange(doorOpen);
     }
+    runPendingCapture();
   } else {
     String eventId;
     if (pollCaptureEvent(eventId)) {
