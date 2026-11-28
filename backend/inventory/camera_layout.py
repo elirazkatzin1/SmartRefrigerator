@@ -1,13 +1,15 @@
 """Where the cameras' views overlap, so a product seen by two cameras is counted once.
 
-Measured on door event 0016_749423be91ecfe8a (27/11/2026), after the cameras were mounted:
-- Upper shelf: camera 4 sees its left part (lettuce, butter, mayonnaise) and camera 1 its right part
-  (cream cheese, eggs, Rich's). The mustard jar between them is at camera 4's right edge and at
-  camera 1's left edge.
-- Lower shelf: camera 2 sees its left part (milk, sauce bottles, peppers) and camera 3 its right part
-  (grape juice, garlic sauce, tomatoes, carrots). The ketchup is at camera 2's right edge and at
-  camera 3's left edge.
-The two shelves don't overlap. Measure again if a camera is moved or turned.
+Measured on door event 0032_98dec90b9e9481a4 (28/11/2026), with the cameras in their final positions
+and the images no longer mirrored (firmware sets hmirror):
+- Upper shelf: camera 1 sees one part (Rich's, cream cheese) and camera 4 the other (eggs). The mustard,
+  mayonnaise and butter between them are at camera 1's right side and at camera 4's left side.
+- Lower shelf: camera 2 sees one part (peppers, milk, sauce bottles) and camera 3 the other (tomatoes,
+  carrots, grape juice, garlic sauce). The ketchup, cheese, sweet chili and cucumbers between them are at
+  camera 2's left side and at camera 3's right side (camera 2 sees all 3 cucumbers, camera 3 two of them).
+The two shelves don't overlap. The strips are a little wider than the shared products: a product only
+one camera sees inside a strip is still counted, while a shared one outside it would be counted twice.
+Measure again if a camera is moved or turned.
 """
 from dataclasses import dataclass
 
@@ -27,8 +29,8 @@ class Overlap:
 
 
 CAMERA_OVERLAPS = (
-    # Upper shelf, around the mustard
-    Overlap(zones={4: (0.85, 1.0), 1: (0.0, 0.13)}),
-    # Lower shelf, around the ketchup
-    Overlap(zones={2: (0.72, 1.0), 3: (0.0, 0.10)}),
+    # Upper shelf: mustard, mayonnaise, butter
+    Overlap(zones={1: (0.70, 1.0), 4: (0.0, 0.35)}),
+    # Lower shelf: ketchup, cheese, sweet chili, cucumbers
+    Overlap(zones={2: (0.0, 0.30), 3: (0.66, 1.0)}),
 )

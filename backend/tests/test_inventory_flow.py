@@ -146,8 +146,8 @@ class InventoryFlowTest(unittest.IsolatedAsyncioTestCase):
     # Several cameras
 
     async def test_product_seen_by_two_overlapping_cameras_is_counted_once(self):
-        # The mustard between the upper-shelf cameras, at camera 4's right edge and camera 1's left edge
-        quantities = await self.door_event({4: [detection("mustard", x=0.93)], 1: [detection("mustard", x=0.06)]})
+        # The mustard between the upper-shelf cameras, at camera 1's right side and camera 4's left side
+        quantities = await self.door_event({1: [detection("mustard", x=0.83)], 4: [detection("mustard", x=0.05)]})
 
         self.assertEqual(quantities, {"mustard": 1})
 

@@ -76,24 +76,40 @@ class MergeDetectionsTest(unittest.TestCase):
 
 
 class FridgeLayoutTest(unittest.TestCase):
-    """The real layout in inventory.camera_layout (event 0016_749423be91ecfe8a)."""
+    """The real layout in inventory.camera_layout (event 0032_98dec90b9e9481a4), positions as measured."""
 
-    def test_mustard_between_the_upper_cameras_is_one(self):
-        snapshot = merge_detections({4: [detection("mustard", x=0.93)], 1: [detection("mustard", x=0.06)]})
+    def test_products_between_the_upper_cameras_are_counted_once(self):
+        snapshot = merge_detections({
+            1: [detection("mustard", x=0.83), detection("butter", x=0.90), detection("mayonnaise", x=0.97)],
+            4: [detection("mustard", x=0.05), detection("butter", x=0.09), detection("mayonnaise", x=0.21)],
+        })
 
-        self.assertEqual(snapshot["mustard"].quantity, 1)
+        self.assertEqual({name: item.quantity for name, item in snapshot.items()},
+                         {"mustard": 1, "butter": 1, "mayonnaise": 1})
 
-    def test_ketchup_between_the_lower_cameras_is_one(self):
-        snapshot = merge_detections({2: [detection("ketchup", x=0.86)], 3: [detection("ketchup", x=0.05)]})
+    def test_cucumbers_between_the_lower_cameras_take_the_higher_count(self):
+        # Camera 2 sees all 3 cucumbers, camera 3 two of them
+        snapshot = merge_detections({
+            2: [detection("cucumber", x=0.08), detection("cucumber", x=0.15), detection("cucumber", x=0.22)],
+            3: [detection("cucumber", x=0.80), detection("cucumber", x=0.92)],
+        })
 
-        self.assertEqual(snapshot["ketchup"].quantity, 1)
+        self.assertEqual(snapshot["cucumber"].quantity, 3)
 
-    def test_eggs_on_both_sides_of_the_upper_shelf_add_up(self):
-        # Two eggs in camera 1's part, one in camera 4's part, none in the strip between them
-        snapshot = merge_detections({1: [detection("eggs", x=0.3), detection("eggs", x=0.5)],
-                                     4: [detection("eggs", x=0.7)]})
+    def test_products_only_one_lower_camera_sees_add_up(self):
+        # Peppers and milk only in camera 2, tomatoes only in camera 3
+        snapshot = merge_detections({
+            2: [detection("bell_pepper", x=0.33), detection("bell_pepper", x=0.50), detection("milk", x=0.66)],
+            3: [detection("tomato", x=0.15), detection("tomato", x=0.40)],
+        })
 
-        self.assertEqual(snapshot["eggs"].quantity, 3)
+        self.assertEqual({name: item.quantity for name, item in snapshot.items()},
+                         {"bell_pepper": 2, "milk": 1, "tomato": 2})
+
+    def test_milk_on_both_shelves_is_two(self):
+        snapshot = merge_detections({1: [detection("milk", x=0.5)], 2: [detection("milk", x=0.66)]})
+
+        self.assertEqual(snapshot["milk"].quantity, 2)
 
 
 if __name__ == "__main__":
