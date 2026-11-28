@@ -20,9 +20,9 @@ _database_error: str | None = None
 
 class NamesTest(unittest.TestCase):
     def test_typed_names_are_matched_to_the_catalog(self):
-        self.assertEqual(shopping.catalog_name("Cottage cheese"), "cottage_cheese")
+        self.assertEqual(shopping.catalog_name("White cheese"), "white_cheese")
         self.assertEqual(shopping.catalog_name("  MILK "), "milk")
-        self.assertEqual(shopping.catalog_name("קוטג'"), "cottage_cheese")
+        self.assertEqual(shopping.catalog_name("גבינה לבנה"), "white_cheese")
         self.assertIsNone(shopping.catalog_name("Toilet paper"))
 
     def test_clean_name(self):
@@ -61,9 +61,9 @@ class ShoppingListTest(unittest.IsolatedAsyncioTestCase):
     # Adding by hand
 
     async def test_typed_item_is_added_and_linked_to_the_catalog(self):
-        item = await shopping.add_manual(self.db, " cottage  cheese ")
+        item = await shopping.add_manual(self.db, " white  cheese ")
 
-        self.assertEqual((item.name, item.product_name, item.source), ("cottage cheese", "cottage_cheese", "manual"))
+        self.assertEqual((item.name, item.product_name, item.source), ("white cheese", "white_cheese", "manual"))
 
     async def test_the_same_item_can_not_be_added_twice(self):
         await shopping.add_manual(self.db, "Olive oil")
@@ -91,9 +91,9 @@ class ShoppingListTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self.names(), [("Milk", "auto", False)])
 
     async def test_a_product_bought_once_is_not_added(self):
-        await self.purchase("pesto")
+        await self.purchase("mustard")
 
-        self.assertEqual(await shopping.add_ran_out_products(self.db, {"pesto"}), [])
+        self.assertEqual(await shopping.add_ran_out_products(self.db, {"mustard"}), [])
 
     async def test_a_product_still_in_the_fridge_is_not_added(self):
         await self.purchase("milk")
