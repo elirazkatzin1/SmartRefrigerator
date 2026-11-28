@@ -84,10 +84,15 @@ async def build_snapshot(db: AsyncSession, event_id: str) -> dict[str, SnapshotI
 
     Failed images (black, corrupted) are left out: they say nothing about what is in the fridge.
     """
+    return merge_detections(await analyzed_detections(db, event_id))
+
+
+async def analyzed_detections(db: AsyncSession, event_id: str) -> dict[int, list[dict]]:
+    """The detections of each camera whose image of this event was analyzed successfully."""
     result = await db.execute(
         select(ImageAnalysis).where(
             ImageAnalysis.event_id == event_id,
             ImageAnalysis.status == AnalysisStatus.DONE.value,
         )
     )
-    return merge_detections({analysis.camera_id: analysis.detections or [] for analysis in result.scalars()})
+    return {analysis.camera_id: analysis.detections or [] for analysis in result.scalars()}

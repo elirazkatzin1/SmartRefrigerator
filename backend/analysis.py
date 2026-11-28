@@ -18,7 +18,7 @@ from database import AsyncSessionLocal
 from log import log
 from inventory.diff import ChangeType, ProductChange, current_quantities, diff_inventory
 from inventory.event_collector import EventCollector, ReadyEvent
-from inventory.merge import build_snapshot
+from inventory.merge import analyzed_detections, merge_detections
 from inventory.update import apply_quantities, apply_removals
 from models import AnalysisStatus, EventAnalysis, ImageAnalysis
 from vision.errors import ImageRejectedError
@@ -86,11 +86,13 @@ async def sync_event(event: ReadyEvent) -> None:
 async def _update_inventory(event: ReadyEvent) -> set[str]:
     """Returns the names of the products removed from the inventory in this event."""
     async with AsyncSessionLocal() as db:
-        snapshot = await build_snapshot(db, event.event_id)
+        detections_by_camera = await analyzed_detections(db, event.event_id)
+        snapshot = merge_detections(detections_by_camera)
         changes = diff_inventory(snapshot, await current_quantities(db))
         event_time = datetime.utcnow()
         await apply_quantities(db, snapshot, changes, event_time)
-        removed = await apply_removals(db, changes, event_time)
+        # Only the cameras whose image was analyzed can tell that a product is gone
+        removed = await apply_removals(db, changes, event_time, cameras_analyzed=set(detections_by_camera))
         recorded = [_recorded_change(change, removed) for change in changes if change.change != ChangeType.UNCHANGED]
         db.add(EventAnalysis(
             event_id=event.event_id,

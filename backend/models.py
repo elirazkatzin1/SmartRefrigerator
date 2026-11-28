@@ -44,6 +44,9 @@ class Inventory(Base):
     # Door events in a row in which the cameras did not see this product. Back to 0 when it is seen;
     # the product is removed only after several misses, since it may just be hidden behind another one
     missed_events = Column(Integer, nullable=False, default=0, server_default="0")
+    # The cameras that saw it last time it was seen. A miss is only counted when one of them sent an
+    # image: if their images are missing, not seeing the product says nothing about it
+    last_seen_by = Column(JSONB, nullable=True)
 
 class ImageAnalysis(Base):
     """One row per uploaded camera image and the result of running the vision pipeline on it."""

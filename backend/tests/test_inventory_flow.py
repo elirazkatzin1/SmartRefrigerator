@@ -21,7 +21,7 @@ from sqlalchemy.engine import make_url
 from database import Base
 from inventory.camera_layout import FRAME_WIDTH
 from inventory.diff import current_quantities, diff_inventory
-from inventory.merge import build_snapshot, merge_detections
+from inventory.merge import analyzed_detections, build_snapshot, merge_detections
 from inventory.update import apply_quantities, apply_removals
 from models import AnalysisStatus, ImageAnalysis, Inventory, InventorySource
 
@@ -74,12 +74,15 @@ class InventoryFlowTest(unittest.IsolatedAsyncioTestCase):
         await self.engine.dispose()
 
     async def door_event(self, detections_by_camera: dict[int, list[dict]]) -> dict[str, int]:
-        """Run one door event through the update and return the quantity of each product after it."""
+        """Run one door event through the update and return the quantity of each product after it.
+
+        The cameras in detections_by_camera are the ones whose image was analyzed, like on the server.
+        """
         self.event_time += timedelta(minutes=10)
         snapshot = merge_detections(detections_by_camera)
         changes = diff_inventory(snapshot, await current_quantities(self.db))
         await apply_quantities(self.db, snapshot, changes, self.event_time)
-        await apply_removals(self.db, changes, self.event_time)
+        await apply_removals(self.db, changes, self.event_time, cameras_analyzed=set(detections_by_camera))
         await self.db.commit()
         return dict(await current_quantities(self.db))
 
@@ -185,8 +188,45 @@ class InventoryFlowTest(unittest.IsolatedAsyncioTestCase):
     async def test_event_with_a_camera_missing_keeps_what_only_that_camera_saw(self):
         await self.door_event({1: [detection("milk")], 2: [detection("lemon")]})
 
-        # Camera 2's image never arrived: the lemon only it sees counts as one miss, not a removal
+        # Camera 2's image never arrived: the lemon only it sees is kept
         self.assertEqual(await self.door_event({1: [detection("milk")]}), {"milk": 1, "lemon": 1})
+
+    async def test_camera_missing_twice_in_a_row_does_not_remove_its_products(self):
+        await self.door_event({1: [detection("rich_cream")], 2: [detection("milk")]})
+
+        # Camera 1's image is missing from two events in a row
+        await self.door_event({2: [detection("milk")]})
+        self.assertEqual(await self.door_event({2: [detection("milk")]}), {"rich_cream": 1, "milk": 1})
+
+        row = (await self.db.execute(select(Inventory).where(Inventory.product_name == "rich_cream"))).scalar_one()
+        self.assertEqual(row.missed_events, 0)
+
+    async def test_product_is_removed_once_its_camera_reports_without_it(self):
+        await self.door_event({1: [detection("rich_cream")], 2: [detection("milk")]})
+        await self.door_event({2: [detection("milk")]})  # camera 1 missing: no miss
+
+        # Camera 1 is back and doesn't see the Rich's, twice
+        await self.door_event({1: [], 2: [detection("milk")]})
+        self.assertEqual(await self.door_event({1: [], 2: [detection("milk")]}), {"milk": 1})
+
+    async def test_product_seen_by_two_cameras_counts_a_miss_if_one_of_them_reports(self):
+        # The mustard in the upper overlap strip is seen by cameras 1 and 4
+        await self.door_event({1: [detection("mustard", x=0.83)], 4: [detection("mustard", x=0.05)]})
+
+        # Camera 1 is missing, camera 4 reports without the mustard: it may be gone
+        await self.door_event({4: []})
+        self.assertEqual(await self.door_event({4: []}), {})
+
+    async def test_failed_image_counts_as_missing(self):
+        self.db.add_all([
+            ImageAnalysis(filename="e1/cam1.jpg", camera_id=1, event_id="e1", status=AnalysisStatus.DONE.value,
+                          detections=[detection("milk")]),
+            ImageAnalysis(filename="e1/cam2.jpg", camera_id=2, event_id="e1", status=AnalysisStatus.FAILED.value,
+                          error="black image"),
+        ])
+        await self.db.commit()
+
+        self.assertEqual(set(await analyzed_detections(self.db, "e1")), {1})
 
     # Manual entries
 

@@ -93,13 +93,19 @@ async def apply_quantities(db: AsyncSession, snapshot: dict[str, SnapshotItem], 
         for row in rows:
             if row.removed_at is None:
                 row.last_seen_at = seen_at
+                row.last_seen_by = sorted(item.camera_ids)
                 row.confidence = item.confidence
                 row.missed_events = 0
 
 
-async def apply_removals(db: AsyncSession, changes: list[ProductChange], event_time: datetime) -> set[str]:
+async def apply_removals(db: AsyncSession, changes: list[ProductChange], event_time: datetime,
+                         cameras_analyzed: set[int] | None = None) -> set[str]:
     """Count one more miss for every product the cameras didn't see, and remove the products that
     were missing from REMOVAL_TOLERANCE_EVENTS events in a row. The caller commits.
+
+    cameras_analyzed are the cameras whose image of this event was analyzed. A product only counts a
+    miss if one of the cameras that last saw it is among them: when those cameras' images are missing
+    or failed, not seeing the product says nothing about it. None counts every product (no camera info).
 
     Returns the names of the products that were removed in this event.
 
@@ -118,6 +124,8 @@ async def apply_removals(db: AsyncSession, changes: list[ProductChange], event_t
             )
         )).scalars().all()
         for row in rows:
+            if cameras_analyzed is not None and row.last_seen_by and not set(row.last_seen_by) & cameras_analyzed:
+                continue
             row.missed_events += 1
             if row.missed_events >= REMOVAL_TOLERANCE_EVENTS:
                 row.removed_at = event_time
