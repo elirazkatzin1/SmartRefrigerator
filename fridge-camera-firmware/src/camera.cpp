@@ -61,11 +61,18 @@ void initCamera() {
 
   esp_err_t err = esp_camera_init(&config);
   cameraReady = (err == ESP_OK);
-  if (cameraReady) {
-    Serial.println("Camera initialized");
-  } else {
+  if (!cameraReady) {
     Serial.printf("Camera init failed: 0x%x\n", err);
+    return;
   }
+
+  // בהגדרות ברירת המחדל התמונה יוצאת הפוכה כמו במראה בכל המצלמות (טקסט על האריזות נקרא הפוך).
+  // הופכים את מצב השיקוף הנוכחי במקום לקבוע ערך, כי ברירת המחדל של הדרייבר תלויה במודול
+  sensor_t *sensor = esp_camera_sensor_get();
+  if (sensor) {
+    sensor->set_hmirror(sensor, !sensor->status.hmirror);
+  }
+  Serial.printf("Camera initialized (hmirror=%d)\n", sensor ? sensor->status.hmirror : -1);
 }
 
 camera_fb_t *captureImage() {
