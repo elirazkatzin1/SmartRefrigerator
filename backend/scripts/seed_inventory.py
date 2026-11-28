@@ -35,7 +35,7 @@ SAMPLE_ITEMS = [
     ("eggs", 12, 20, 7),
     ("tomato", 6, 5, 2),
     ("cucumber", 4, 3, 4),
-    ("lettuce", 1, 0, 6),
+    ("yogurt", 1, 0, 6),
     ("lemon", 3, 8, 10),
     ("garlic_sauce", 1, -3, 9),
     ("ketchup", 1, None, 30),

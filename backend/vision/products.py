@@ -39,11 +39,11 @@ PRODUCTS: tuple[Product, ...] = (
     # Rich's non-dairy whipping cream: parve, but sold and stored next to the dairy creams
     Product("rich_cream", "ריץ'", Category.DAIRY),
     Product("whipping_cream", "שמנת מתוקה", Category.DAIRY),
+    Product("yogurt", "יוגורט", Category.DAIRY),
     Product("tomato", "עגבנייה", Category.VEGETABLES),
     Product("cucumber", "מלפפון", Category.VEGETABLES),
     Product("bell_pepper", "גמבה", Category.VEGETABLES),
     Product("carrot", "גזר", Category.VEGETABLES),
-    Product("lettuce", "חסה", Category.VEGETABLES),
     Product("lemon", "לימון", Category.FRUIT),
     Product("grape_juice", "מיץ ענבים", Category.DRINKS),
     Product("garlic_sauce", "רוטב שום", Category.SPREADS_AND_SAUCES),
